@@ -1,0 +1,29 @@
+name: Backend CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - remove-workbuddy-dependency
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    env:
+      DATABASE_URL: postgresql://data_agent:ci@127.0.0.1:5432/data_agent
+      SESSION_SECRET: ci-session-secret-that-is-at-least-32-characters
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package.json
+      - run: npm install
+      - run: npm run validate
+      - run: npm run generate
+      - run: npm run typecheck
