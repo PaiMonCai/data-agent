@@ -34,6 +34,21 @@ if (env.appOrigin) {
 
 app.use("/api/*", async (c, next) => {
   c.header("Cache-Control", "no-store");
+
+  const method = c.req.method.toUpperCase();
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    const origin = c.req.header("Origin");
+    if (origin) {
+      const expectedOrigin = env.appOrigin || new URL(c.req.url).origin;
+      if (origin !== expectedOrigin) {
+        return c.json(
+          { error: { code: "origin_forbidden", message: "请求来源不受信任" } },
+          403
+        );
+      }
+    }
+  }
+
   await next();
 });
 
