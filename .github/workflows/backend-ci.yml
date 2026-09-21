@@ -10,12 +10,29 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: data_agent
+          POSTGRES_USER: data_agent
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U data_agent -d data_agent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     defaults:
       run:
         working-directory: server
     env:
       DATABASE_URL: postgresql://data_agent:ci@127.0.0.1:5432/data_agent
       SESSION_SECRET: ci-session-secret-that-is-at-least-32-characters
+      SERVE_STATIC: "false"
+      MAIL_MODE: console
+      LLM_BASE_URL: https://example.invalid/v1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,3 +42,29 @@ jobs:
       - run: npm run validate
       - run: npm run generate
       - run: npm run typecheck
+      - run: npm run build
+      - run: npx prisma migrate deploy
+      - name: Runtime smoke test
+        shell: bash
+        run: |
+          node dist/index.js > /tmp/data-agent-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true; cat /tmp/data-agent-server.log' EXIT
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+
+          STATUS=$(curl -sS -o /tmp/session.json -w '%{http_code}' http://127.0.0.1:3000/api/auth/session)
+          test "$STATUS" = "401"
+          grep -q '"auth_required"' /tmp/session.json
+
+      - name: Docker image build
+        working-directory: .
+        run: docker build -f server/Dockerfile .
