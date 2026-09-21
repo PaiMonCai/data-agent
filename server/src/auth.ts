@@ -195,7 +195,7 @@ router.post("/otp/request", async (c) => {
 
     return c.json({
       verificationId,
-      isExistingUser: Boolean(user),
+      ...(purpose === "signup" ? { isExistingUser: Boolean(user) } : {}),
     });
   } catch (e) {
     return jsonError(c, e);
