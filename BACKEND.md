@@ -14,7 +14,13 @@
 
 ## 1. 环境变量
 
-Docker Compose 从仓库根目录的 `.env` 读取部署变量。最小配置：
+Docker Compose 从仓库根目录的 `.env` 读取部署变量。先复制模板：
+
+```bash
+cp .env.example .env
+```
+
+然后至少填写：
 
 ```env
 POSTGRES_PASSWORD=replace-with-a-long-random-password
@@ -62,7 +68,7 @@ COOKIE_SAME_SITE=None
 COOKIE_SECURE=true
 ```
 
-同域部署无需设置 `APP_ORIGIN`。
+直接访问 Node 服务时同域部署可以不设置 `APP_ORIGIN`。如果正式环境前面有 Nginx / OpenResty / Cloudflare 等 HTTPS 反向代理，建议显式设置公开 Origin，例如 `APP_ORIGIN=https://data.example.com`，用于跨站写请求校验。
 
 ## 2. 启动
 
