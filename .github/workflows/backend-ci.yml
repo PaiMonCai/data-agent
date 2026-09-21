@@ -65,6 +65,47 @@ jobs:
           test "$STATUS" = "401"
           grep -q '"auth_required"' /tmp/session.json
 
+          OTP_RESPONSE=$(curl -fsS \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"ci@example.com","purpose":"login"}' \
+            http://127.0.0.1:3000/api/auth/otp/request)
+          VERIFICATION_ID=$(printf '%s' "$OTP_RESPONSE" | jq -r '.verificationId')
+          test -n "$VERIFICATION_ID"
+          test "$VERIFICATION_ID" != "null"
+
+          for i in {1..10}; do
+            CODE=$(grep '\[OTP\] ci@example.com' /tmp/data-agent-server.log | tail -1 | grep -oE '[0-9]{6}        working-directory: .
+        run: docker build -f server/Dockerfile .
+ || true)
+            if [ -n "$CODE" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$CODE"
+
+          curl -fsS \
+            -c /tmp/cookies.txt \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -nc --arg id "$VERIFICATION_ID" --arg code "$CODE" '{verificationId:$id,token:$code,email:"ci@example.com",purpose:"login"}')" \
+            http://127.0.0.1:3000/api/auth/otp/verify > /tmp/login.json
+          grep -q 'ci@example.com' /tmp/login.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/auth/session > /tmp/session-auth.json
+          grep -q 'ci@example.com' /tmp/session-auth.json
+
+          curl -fsS \
+            -b /tmp/cookies.txt \
+            -H 'Content-Type: application/json' \
+            -d '{"rows":[{"name":"CI Dataset","source":"sample","columns":[],"row_count":0}]}' \
+            http://127.0.0.1:3000/api/data/datasets > /tmp/dataset-create.json
+          grep -q 'CI Dataset' /tmp/dataset-create.json
+
+          curl -fsS \
+            -b /tmp/cookies.txt \
+            'http://127.0.0.1:3000/api/data/datasets?select=id,name' > /tmp/datasets.json
+          grep -q 'CI Dataset' /tmp/datasets.json
+
       - name: Docker image build
         working-directory: .
         run: docker build -f server/Dockerfile .
