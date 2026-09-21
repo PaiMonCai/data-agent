@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  password_hash String?
+  created_at    DateTime     @default(now())
+  updated_at    DateTime     @default(now()) @updatedAt
+  sessions      Session[]
+  otp_codes     OtpCode[]
+  datasets      Dataset[]
+
+  @@map("users")
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  token_hash String   @unique
+  user_id    String
+  expires_at DateTime
+  created_at DateTime @default(now())
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([expires_at])
+  @@map("sessions")
+}
+
+model OtpCode {
+  id              String    @id @default(cuid())
+  verification_id String    @unique
+  user_id         String?
+  email           String
+  purpose         String
+  code_hash       String
+  attempts        Int       @default(0)
+  expires_at      DateTime
+  consumed_at     DateTime?
+  created_at      DateTime  @default(now())
+  user            User?     @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([email, purpose, created_at])
+  @@index([expires_at])
+  @@map("otp_codes")
+}
+
+model Dataset {
+  id         String       @id @default(cuid())
+  user_id    String
+  name       String
+  source     String
+  columns    Json
+  row_count  Int
+  created_at DateTime     @default(now())
+  updated_at DateTime     @default(now()) @updatedAt
+  user       User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  rows       DatasetRow[]
+  analyses   Analysis[]
+
+  @@index([user_id, created_at])
+  @@map("datasets")
+}
+
+model DatasetRow {
+  id         String   @id @default(cuid())
+  user_id    String
+  dataset_id String
+  row_index  Int
+  data       Json
+  created_at DateTime @default(now())
+  dataset    Dataset  @relation(fields: [dataset_id], references: [id], onDelete: Cascade)
+
+  @@unique([dataset_id, row_index])
+  @@index([user_id, dataset_id, row_index])
+  @@map("dataset_rows")
+}
+
+model Analysis {
+  id         String   @id @default(cuid())
+  user_id    String
+  dataset_id String
+  question   String
+  kind       String
+  plan       Json?
+  result     Json
+  summary    String?  @db.Text
+  model      String?
+  created_at DateTime @default(now())
+  dataset    Dataset  @relation(fields: [dataset_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, dataset_id, created_at])
+  @@map("analyses")
+}
