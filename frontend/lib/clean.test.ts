@@ -97,6 +97,28 @@ test("evalExpr 字段名按大小写与空格模糊匹配", () => {
   assert.throws(() => Clean.evalExpr("city name", row, ["City Name"]), /多余内容/);
 });
 
+test("evalExpr 比较符支持单等号，逻辑支持 && 和 ||", () => {
+  const row = { city: "SH", amount: "100" };
+  // 单等号：tokenize 之前不认识 =，写上去只会报「无法识别的符号」
+  assert.equal(Clean.evalExpr("city = 'SH'", row, ["city", "amount"]), true);
+  assert.equal(Clean.evalExpr("city = 'BJ'", row, ["city", "amount"]), false);
+  assert.equal(Clean.evalExpr("amount = 100", row, ["amount"]), true);
+  // 符号写法：&& 和 || 以前同样切不出 token，且 logic() 只认 id 形式
+  assert.equal(Clean.evalExpr("amount > 50 && city = 'SH'", row, ["city", "amount"]), true);
+  assert.equal(Clean.evalExpr("amount > 500 || city = 'SH'", row, ["city", "amount"]), true);
+  assert.equal(Clean.evalExpr("amount > 500 || city = 'BJ'", row, ["city", "amount"]), false);
+  assert.equal(Clean.evalExpr("amount > 500 && city = 'BJ'", row, ["city", "amount"]), false);
+  assert.equal(Clean.evalExpr("amount > 50 AND city = 'SH'", row, ["city", "amount"]), true);
+  assert.equal(Clean.evalExpr("amount > 50 and city = 'SH'", row, ["city", "amount"]), true);
+  // 混合写法
+  assert.equal(Clean.evalExpr("amount >= 100 && city == 'SH' || qty > 99", row, ["city", "amount", "qty"]), true);
+});
+
+test("evalExpr 单个 & 或 | 仍然报错，不会静默变成逻辑符", () => {
+  const row = { a: 1, b: 2 };
+  assert.throws(() => Clean.evalExpr("a > 0 & b > 0", row, ["a", "b"]), /无法识别的符号|多余内容/);
+  assert.throws(() => Clean.evalExpr("a > 0 | b > 0", row, ["a", "b"]), /无法识别的符号|多余内容/);
+});
 test("evalExpr 拒绝坏输入", () => {
   assert.throws(() => Clean.evalExpr("a $ 1", { a: 1 }, ["a"]), /无法识别的符号/);
   assert.throws(() => Clean.evalExpr("nope + 1", {}, ["a"]), /不存在的字段/);

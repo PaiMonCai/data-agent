@@ -75,6 +75,15 @@ const Clean = (function () {
     | { t: 'id'; v: string }
     | { t: 'op'; v: string };
 
+  /** AND/OR 的四种写法：单词大小写不敏感，符号写法只认 && 和 || */
+  const LOGIC_WORDS = ['AND', 'OR', 'and', 'or'];
+  const LOGIC_SYMBOLS = ['&&', '||'];
+
+  /** && / || 是 op token，AND / OR 是 id token，两边都要接 */
+  function isLogicOp(t: CleanToken): boolean {
+    return (t.t === 'id' && LOGIC_WORDS.includes(t.v)) || (t.t === 'op' && LOGIC_SYMBOLS.includes(t.v));
+  }
+
   function tokenize(src: string): CleanToken[] {
     const s = String(src);
     const out: CleanToken[] = [];
@@ -106,8 +115,8 @@ const Clean = (function () {
         continue;
       }
       const two = s.substr(i, 2);
-      if (['>=', '<=', '!=', '=='].includes(two)) { out.push({ t: 'op', v: two }); i += 2; continue; }
-      if ('+-*/%^(),<>'.includes(c)) { out.push({ t: 'op', v: c }); i++; continue; }
+      if (['>=', '<=', '!=', '==', '&&', '||'].includes(two)) { out.push({ t: 'op', v: two }); i += 2; continue; }
+      if ('+-*/%^(),<>=%'.includes(c)) { out.push({ t: 'op', v: c }); i++; continue; }
       throw new Error('表达式里有无法识别的符号：' + c);
     }
     return out;
@@ -131,8 +140,8 @@ const Clean = (function () {
     function logic(): unknown {
       let left: unknown = comparison();
       let t = peek();
-      while (t && t.t === 'id' && ['AND', 'OR', 'and', 'or', '&&', '||'].includes(t.v)) {
-        const op = t.v.toUpperCase();
+      while (t && isLogicOp(t)) {
+        const op = t.t === 'id' ? t.v.toUpperCase() : t.v;
         p++;
         const right = comparison();
         left = (op === 'OR' || op === '||') ? (left || right) : (left && right);
