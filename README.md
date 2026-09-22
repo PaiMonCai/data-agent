@@ -69,7 +69,7 @@ http://服务器IP:3000
 - Provider Base URL / API Key
 - 每个 Provider 的模型渠道开关
 - 前端逻辑模型名 → 上游真实模型名映射
-- 同一逻辑模型的多渠道轮询 / 固定优先
+- 同一逻辑模型的多渠道 Round Robin 轮询
 - 从 `/models` 自动导入上游模型
 
 LLM 与 SMTP 配置保存后立即生效，不需要重启容器。LLM API Key 与 SMTP 密码均使用 `SYSTEM_CONFIG_ENCRYPTION_KEY` 加密保存。
@@ -81,7 +81,7 @@ OpenAI  : gpt-5.6
 NewAPI  : gpt-5.6-2026
 ```
 
-都映射成前端的 `gpt-5.6`。用户只会看到一个 `gpt-5.6`，后端可以在两个启用渠道之间轮询。管理员也可以单独关闭任意供应商的某个模型渠道。
+都映射成前端的 `gpt-5.6`。用户只会看到一个 `gpt-5.6`，后端按请求在所有启用渠道之间 Round Robin 轮询。管理员可以单独关闭任意渠道；只剩一个启用渠道时，该逻辑模型自然固定走这一路。
 
 如果后台还没有保存 LLM 配置，系统继续使用 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODELS` 环境变量作为兼容 fallback。
 
