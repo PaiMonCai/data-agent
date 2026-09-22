@@ -137,7 +137,7 @@ jobs:
           curl -fsS -b /tmp/admin-cookies.txt \
             -X PATCH \
             -H 'Content-Type: application/json' \
-            -d '{"providers":[{"id":"ci-a","name":"CI A","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":[{"publicModel":"mock-model","upstreamModel":"mock-model-a","enabled":true}],"enabled":true},{"id":"ci-b","name":"CI B","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":[{"publicModel":"mock-model","upstreamModel":"mock-model-b","enabled":true}],"enabled":true}],"routing":{"mock-model":"round_robin"}}' \
+            -d '{"providers":[{"id":"ci-a","name":"CI A","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-a"],"enabled":true},{"id":"ci-b","name":"CI B","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-b"],"enabled":true}],"models":[{"id":"mock-model","name":"Mock Model","enabled":true,"strategy":"round_robin","channels":[{"id":"channel-a","providerId":"ci-a","upstreamModel":"mock-model-a","enabled":true},{"id":"channel-b","providerId":"ci-b","upstreamModel":"mock-model-b","enabled":true}]}]}' \
             http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-after.json
           grep -q '"source":"database"' /tmp/admin-llm-after.json
           grep -q '"hasApiKey":true' /tmp/admin-llm-after.json
