@@ -332,7 +332,7 @@ const Engine = (function () {
     timeField: string,
     metric: string,
     agg: string,
-    granularity?: Granularity
+    granularity?: Granularity | null
   ): { points: TrendPoint[]; granularity: Granularity } {
     const buckets = new Map<number, number[]>();
     const dates: number[] = [];

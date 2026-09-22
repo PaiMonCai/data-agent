@@ -2,6 +2,7 @@ import type {
   AnalysisOutcome,
   AnalysisPlan,
   AnalysisResult,
+  CleanPlan,
   CleanResult,
 } from "@/lib/types";
 
@@ -12,6 +13,7 @@ export type {
   AnalysisPlan,
   AnalysisResult,
   AnalysisFilter,
+  CleanPlan,
   CleanResult,
   CleanStepReport,
 } from "@/lib/types";
@@ -23,7 +25,7 @@ export type ChatItem = {
   question: string;
   stage?: string;
   report?: string;
-  plan?: AnalysisPlan | null;
+  plan?: AnalysisPlan | CleanPlan | null;
   result?: AnalysisResult | null;
   clean?: CleanResult | null;
   task?: ChatTask;
