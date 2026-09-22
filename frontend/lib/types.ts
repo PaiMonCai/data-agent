@@ -177,6 +177,32 @@ export interface AnalysisResult {
 }
 
 /* ---------- 数据清洗 ---------- */
+/** 模型产出的一步清洗指令。字段全部可选：模型可能漏填，由引擎逐 op 兜底 */
+export interface CleanStep {
+  op?: string;
+  column?: string;
+  columns?: string[];
+  strategy?: string;
+  value?: unknown;
+  how?: string;
+  filters?: AnalysisFilter[];
+  type?: string;
+  from?: string;
+  to?: string;
+  map?: Record<string, unknown>;
+  contains?: boolean;
+  mode?: string;
+  delimiter?: string;
+  into?: string[];
+  name?: string;
+  expr?: string;
+  by?: string;
+  order?: string;
+  n?: number | string;
+  min?: number | string;
+  max?: number | string;
+}
+
 
 /** 清洗引擎单步操作的执行结果 */
 export interface CleanStepReport {
