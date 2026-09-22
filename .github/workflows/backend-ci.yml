@@ -44,6 +44,85 @@ jobs:
       BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password
     steps:
       - uses: actions/checkout@v4
+      - name: Check installer syntax
+        working-directory: .
+        run: |
+          bash -n install.sh
+          bash -n deploy/install-database.sh
+
+      - name: Render one-click local deployment
+        working-directory: .
+        env:
+          DATA_AGENT_INSTALL_DIR: /tmp/data-agent-installer-local
+          DATA_AGENT_ADMIN_EMAIL: ci-admin@example.com
+          DATA_AGENT_APP_PORT: "19000"
+          DATA_AGENT_APP_ORIGIN: http://127.0.0.1:19000
+          DATA_AGENT_ACCESS_MODE: http
+          DATA_AGENT_DB_MODE: local
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+        run: |
+          sudo -E bash install.sh --yes --render-only
+          cd /tmp/data-agent-installer-local
+          sudo docker compose config >/dev/null
+          sudo docker compose config --services | grep -qx postgres
+          sudo grep -q '^DATA_AGENT_DB_MODE=local$' .env
+          sudo grep -q '^DATA_AGENT_DB_HOST_KIND=managed$' .env
+          sudo rm -rf /tmp/data-agent-installer-local
+
+      - name: Render one-click external database deployment
+        working-directory: .
+        env:
+          DATA_AGENT_INSTALL_DIR: /tmp/data-agent-installer-external
+          DATA_AGENT_ADMIN_EMAIL: ci-admin@example.com
+          DATA_AGENT_APP_PORT: "19001"
+          DATA_AGENT_APP_ORIGIN: http://127.0.0.1:19001
+          DATA_AGENT_ACCESS_MODE: http
+          DATA_AGENT_DB_MODE: external
+          DATA_AGENT_DATABASE_URL: postgresql://data_agent:ci-secret@db.example.internal:5432/data_agent?sslmode=require
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+        run: |
+          sudo -E bash install.sh --yes --render-only
+          cd /tmp/data-agent-installer-external
+          sudo docker compose config >/dev/null
+          ! sudo docker compose config --services | grep -qx postgres
+          sudo grep -q '^DATA_AGENT_DB_MODE=external$' .env
+          sudo grep -q '^DATA_AGENT_DB_HOST_KIND=external$' .env
+          sudo grep -q 'host.docker.internal:host-gateway' compose.yaml
+          sudo rm -rf /tmp/data-agent-installer-external
+
+      - name: Provision host Docker PostgreSQL
+        working-directory: .
+        env:
+          DATA_AGENT_INSTALL_DIR: /tmp/data-agent-installer-host
+          DATA_AGENT_ADMIN_EMAIL: ci-admin@example.com
+          DATA_AGENT_APP_PORT: "19002"
+          DATA_AGENT_APP_ORIGIN: http://127.0.0.1:19002
+          DATA_AGENT_ACCESS_MODE: http
+          DATA_AGENT_DB_MODE: host
+          DATA_AGENT_DB_CONTAINER: data-agent-host-postgres-ci
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+        run: |
+          sudo docker run -d --name data-agent-host-postgres-ci \
+            -e POSTGRES_USER=postgres \
+            -e "POSTGRES_PASSWORD=ci-root-pa'ss" \
+            -e POSTGRES_DB=postgres \
+            postgres:17-alpine >/dev/null
+          trap 'sudo docker rm -f data-agent-host-postgres-ci >/dev/null 2>&1 || true; sudo docker network rm data-agent-db-link >/dev/null 2>&1 || true; sudo rm -rf /tmp/data-agent-installer-host' EXIT
+
+          sudo -E bash install.sh --yes --render-only
+          cd /tmp/data-agent-installer-host
+          sudo docker compose config >/dev/null
+          ! sudo docker compose config --services | grep -qx postgres
+          sudo grep -q '^DATA_AGENT_DB_MODE=host$' .env
+          sudo grep -q '^DATA_AGENT_DB_HOST_KIND=docker-container$' .env
+          sudo grep -q '^DATA_AGENT_DB_CONTAINER=data-agent-host-postgres-ci$' .env
+          sudo grep -q 'name: data-agent-db-link' compose.yaml
+
+          DB_PASS="$(sudo sed -n 's/^DATA_AGENT_DB_PASSWORD=//p' .env)"
+          sudo docker run --rm --network data-agent-db-link \
+            -e PGPASSWORD="$DB_PASS" postgres:17-alpine \
+            psql -h data-agent-host-postgres-ci -U data_agent -d data_agent -Atqc 'SELECT 1' | grep -qx 1
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -193,3 +272,26 @@ jobs:
       - name: Docker image build
         working-directory: .
         run: docker build -f server/Dockerfile .
+
+      - name: Full one-click installer smoke
+        working-directory: .
+        env:
+          DATA_AGENT_INSTALL_DIR: /tmp/data-agent-installer-smoke
+          DATA_AGENT_ADMIN_EMAIL: installer-smoke@example.com
+          DATA_AGENT_APP_PORT: "19003"
+          DATA_AGENT_APP_ORIGIN: http://127.0.0.1:19003
+          DATA_AGENT_ACCESS_MODE: http
+          DATA_AGENT_DB_MODE: local
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:latest
+        run: |
+          trap 'if [ -f /tmp/data-agent-installer-smoke/compose.yaml ]; then cd /tmp/data-agent-installer-smoke && sudo docker compose down -v --remove-orphans || true; fi; sudo rm -rf /tmp/data-agent-installer-smoke' EXIT
+          sudo -E bash install.sh --yes
+          curl -fsS http://127.0.0.1:19003/api/health | grep -q '"ok":true'
+
+          BOOTSTRAP_FILE_VALUE="$(sudo sed -n 's/^BOOTSTRAP_ADMIN_PASSWORD=//p' /tmp/data-agent-installer-smoke/.env | tail -1)"
+          test -z "$BOOTSTRAP_FILE_VALUE"
+
+          APP_ID="$(cd /tmp/data-agent-installer-smoke && sudo docker compose ps -q app)"
+          test -n "$APP_ID"
+          BOOTSTRAP_CONTAINER_VALUE="$(sudo docker inspect "$APP_ID" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^BOOTSTRAP_ADMIN_PASSWORD=//p' | tail -1)"
+          test -z "$BOOTSTRAP_CONTAINER_VALUE"

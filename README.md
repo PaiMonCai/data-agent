@@ -21,7 +21,37 @@
 - 数据库：PostgreSQL + Prisma
 - 部署：Docker Compose
 
-## 快速部署
+## 一键交互安装（推荐）
+
+Linux 服务器直接运行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/PaiMonCai/data-agent/main/install.sh | sudo bash
+```
+
+安装器会交互完成：
+
+- Docker / Docker Compose v2 检查；缺失时可选择自动安装
+- 安装目录、访问端口与 `APP_ORIGIN`
+- HTTPS 反向代理模式或直接 HTTP 模式
+- 首次管理员邮箱与密码（密码可留空自动生成）
+- `SESSION_SECRET` 与 `SYSTEM_CONFIG_ENCRYPTION_KEY`
+- 可选的 OpenAI-compatible LLM fallback；也可以安装后在 `/admin` 配置
+- PostgreSQL 数据库接入
+- Compose 启动与 `/api/health` 健康检查
+- 管理员 bootstrap 成功后清除部署文件和运行容器中的明文 bootstrap 密码
+
+数据库有三种模式：
+
+1. **内置 PostgreSQL 17**：推荐全新部署，使用独立 Docker volume。
+2. **宿主机 PostgreSQL**：自动检测系统 PostgreSQL 或 1Panel / Docker PostgreSQL。容器数据库会自动建库、建用户并接入专用 `data-agent-db-link` 网络；系统 PostgreSQL 会优先尝试 `host.docker.internal`，无法直连时启用仅 Docker 网关可见的安全代理。
+3. **外部 PostgreSQL**：输入完整 `DATABASE_URL`，支持远程数据库和 SSL 参数。
+
+如果重新连接已有 Data Agent 数据库，请复用原来的 `SYSTEM_CONFIG_ENCRYPTION_KEY`，否则数据库里已经保存的 SMTP / LLM 密钥无法解密。
+
+### 手动 Docker Compose 部署
+
+也可以继续使用仓库原有 Compose：
 
 ```bash
 cp .env.example .env
