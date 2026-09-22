@@ -57,7 +57,7 @@ const llmProviderSchema = z.object({
 
 const llmSchema = z.object({
   providers: z.array(llmProviderSchema).max(20),
-  routing: z.record(z.enum(["round_robin", "priority"])).optional(),
+  routing: z.record(z.string(), z.enum(["round_robin", "priority"])).optional(),
 });
 
 router.get("/settings/mail", async (c) => {
