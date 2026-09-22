@@ -135,26 +135,35 @@ export interface AdminMailSettings {
   source: "database" | "environment";
 }
 
-export interface AdminLlmModelChannel {
-  publicModel: string;
-  upstreamModel: string;
-  enabled: boolean;
-}
-
 export interface AdminLlmProvider {
   id: string;
   name: string;
   baseUrl: string;
-  models: AdminLlmModelChannel[];
+  models: string[];
   enabled: boolean;
   hasApiKey: boolean;
   source: "database" | "environment";
 }
 
+export interface AdminLlmChannel {
+  id: string;
+  providerId: string;
+  upstreamModel: string;
+  enabled: boolean;
+}
+
+export interface AdminLlmModel {
+  id: string;
+  name: string;
+  enabled: boolean;
+  strategy: "round_robin";
+  channels: AdminLlmChannel[];
+}
+
 export interface AdminLlmSettings {
   source: "database" | "environment";
   providers: AdminLlmProvider[];
-  routing: Record<string, "round_robin" | "priority">;
+  models: AdminLlmModel[];
 }
 
 const admin = {
@@ -181,14 +190,21 @@ const admin = {
       name: string;
       baseUrl: string;
       apiKey?: string;
-      models: Array<{
-        publicModel: string;
+      models: string[];
+      enabled: boolean;
+    }>;
+    models: Array<{
+      id: string;
+      name: string;
+      enabled: boolean;
+      strategy: "round_robin";
+      channels: Array<{
+        id: string;
+        providerId: string;
         upstreamModel: string;
         enabled: boolean;
       }>;
-      enabled: boolean;
     }>;
-    routing?: Record<string, "round_robin" | "priority">;
   }) => withAuthRetry(() => request<AdminLlmSettings>("/admin/settings/llm", {
     method: "PATCH",
     body: JSON.stringify(payload),
