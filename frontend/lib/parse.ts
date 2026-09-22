@@ -1,9 +1,26 @@
-// @ts-nocheck
+import type { ColumnMeta, ColumnType, DataRow, ParsedTable } from "./types";
+
+/** `Parse.fromText` 的可选参数：分隔符与表头是否显式给出 */
+export interface ParseTextOptions {
+  delimiter?: string;
+  hasHeader?: boolean;
+}
+
+/** `Parse.workbook` 的返回值：工作表清单加一个取表函数 */
+/** dta.ts 加完类型之前的过渡契约 */
+interface StataTableReader {
+  read(bytes: Uint8Array): Promise<ParsedTable>;
+}
+
+export interface ParseWorkbook {
+  sheets: string[];
+  use(sheetName?: string): ParsedTable;
+}
 
 /* 数据解析：分隔文本 / JSON -> { headers, rows, columns } */
 const Parse = (function () {
 
-  function detectDelimiter(text) {
+  function detectDelimiter(text: string): string {
     const head = text.split(/\r?\n/).slice(0, 5).join('\n');
     const cands = [',', '\t', ';', '|'];
     let best = ',', bestScore = -1;
@@ -18,7 +35,7 @@ const Parse = (function () {
     return best;
   }
 
-  function splitLine(line, delim) {
+  function splitLine(line: string, delim: string): string[] {
     const out = [];
     let cur = '', quoted = false;
     for (let i = 0; i < line.length; i++) {
@@ -38,7 +55,7 @@ const Parse = (function () {
     return out;
   }
 
-  function toNumber(v) {
+  function toNumber(v: unknown): number | null {
     if (v === null || v === undefined) return null;
     const s = String(v).trim();
     if (!s) return null;
@@ -47,7 +64,7 @@ const Parse = (function () {
     return Number(cleaned);
   }
 
-  function toDate(v) {
+  function toDate(v: unknown): Date | null {
     if (v === null || v === undefined) return null;
     const s = String(v).trim();
     if (!s) return null;
@@ -70,7 +87,7 @@ const Parse = (function () {
     return null;
   }
 
-  function inferColumnType(values) {
+  function inferColumnType(values: unknown[]): ColumnType {
     const sample = values.filter((v) => v !== null && v !== undefined && String(v).trim() !== '').slice(0, 200);
     if (!sample.length) return 'string';
     let num = 0, date = 0;
@@ -78,15 +95,15 @@ const Parse = (function () {
       if (toNumber(v) !== null) num++;
       if (toDate(v) !== null) date++;
     }
-    const ratio = (x) => x / sample.length;
+    const ratio = (x: number) => x / sample.length;
     if (ratio(date) >= 0.9 && num < sample.length) return 'date';
     if (ratio(num) >= 0.9) return 'number';
     return 'string';
   }
 
   /* 文本 -> 表格 */
-  function fromText(text, opts = {}) {
-    const raw = String(text).replace(/^﻿/, '').trim();
+  function fromText(text: string, opts: ParseTextOptions = {}): ParsedTable {
+    const raw = String(text).replace(/^\uFEFF/, '').trim();
     if (!raw) throw new Error('内容为空');
 
     const trimmed = raw.trimLeft();
@@ -101,7 +118,7 @@ const Parse = (function () {
     for (const r of grid) while (r.length < width) r.push('');
 
     const hasHeader = opts.hasHeader !== undefined ? opts.hasHeader : guessHeader(grid);
-    let headers, body;
+    let headers: string[], body: string[][];
     if (hasHeader) {
       headers = grid[0].map((h, i) => String(h).trim() || ('列' + (i + 1)));
       body = grid.slice(1);
@@ -113,21 +130,24 @@ const Parse = (function () {
     const rows = body
       .filter((r) => r.some((c) => String(c).trim() !== ''))
       .map((r) => {
-        const o = {};
+        const o: DataRow = {};
         headers.forEach((h, i) => { o[h] = r[i] === undefined ? '' : String(r[i]).trim(); });
         return o;
       });
     return build(headers, rows);
   }
 
-  function fromJSON(json) {
-    const arr = Array.isArray(json) ? json : (Array.isArray(json.data) ? json.data : [json]);
+  function fromJSON(json: unknown): ParsedTable {
+    // 顶层可能是数组、{ data: [...] } 或单条记录
+    const root = json as { data?: unknown };
+    const arr: unknown[] = Array.isArray(json) ? json : Array.isArray(root.data) ? root.data : [json];
     if (!arr.length) throw new Error('JSON 中没有数据行');
-    const headers = dedupe(Object.keys(arr[0]));
+    const headers = dedupe(Object.keys(arr[0] as Record<string, unknown>));
     const rows = arr.map((o) => {
-      const r = {};
+      const rec = (o ?? {}) as Record<string, unknown>;
+      const r: DataRow = {};
       headers.forEach((h) => {
-        const v = o[h];
+        const v = rec[h];
         r[h] = v === null || v === undefined ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
       });
       return r;
@@ -135,7 +155,7 @@ const Parse = (function () {
     return build(headers, rows);
   }
 
-  function guessHeader(grid) {
+  function guessHeader(grid: string[][]): boolean {
     if (grid.length < 2) return true;
     const first = grid[0];
     const nonNumeric = first.filter((c) => toNumber(c) === null).length;
@@ -143,8 +163,8 @@ const Parse = (function () {
     return nonNumeric === first.length && allText.every((n) => n <= nonNumeric);
   }
 
-  function dedupe(names) {
-    const seen = {};
+  function dedupe(names: string[]): string[] {
+    const seen: Record<string, number> = {};
     return names.map((n) => {
       if (!seen[n]) { seen[n] = 1; return n; }
       seen[n]++;
@@ -152,7 +172,7 @@ const Parse = (function () {
     });
   }
 
-  function inferColumns(headers, rows) {
+  function inferColumns(headers: string[], rows: DataRow[]): ColumnMeta[] {
     return headers.map((name) => {
       const vals = rows.slice(0, 500).map((r) => r[name]);
       const type = inferColumnType(vals);
@@ -170,16 +190,16 @@ const Parse = (function () {
     });
   }
 
-  function build(headers, rows) {
+  function build(headers: string[], rows: DataRow[]): ParsedTable {
     return { headers, rows, columns: inferColumns(headers, rows) };
   }
 
   /* ---------- Excel / WPS 表格 ---------- */
   const XLSX_EXT = /\.(xlsx|xlsm|xls|xlsb|ods)$/i;
 
-  function isExcel(fileName) { return XLSX_EXT.test(String(fileName || '')); }
+  function isExcel(fileName: unknown): boolean { return XLSX_EXT.test(String(fileName || '')); }
 
-  async function workbook(arrayBuffer) {
+  async function workbook(arrayBuffer: ArrayBuffer): Promise<ParseWorkbook> {
     const XLSX = await import('xlsx');
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
     if (!wb.SheetNames.length) throw new Error('这个文件里没有工作表');
@@ -193,7 +213,7 @@ const Parse = (function () {
         if (!arr.length) throw new Error('工作表「' + name + '」没有数据');
         const headers = dedupe(Object.keys(arr[0]));
         return build(headers, arr.map((o) => {
-          const row = {};
+          const row: DataRow = {};
           headers.forEach((h) => {
             const v = o[h];
             row[h] = v === null || v === undefined ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
@@ -205,11 +225,12 @@ const Parse = (function () {
   }
 
   /* ---------- 示例数据 ---------- */
-  function sampleData() {
+  function sampleData(): ParsedTable {
+    const SAMPLE_BASE: Record<string, number> = { '线上商城': 3200, '线下门店': 2400, '社群团购': 1500, '直播带货': 2600 };
     const channels = ['线上商城', '线下门店', '社群团购', '直播带货'];
     const regions = ['华东', '华北', '华南', '西南'];
     const headers = ['日期', '渠道', '地区', '订单数', '销售额', '退款额', '访客数', '毛利率'];
-    const rows = [];
+    const rows: DataRow[] = [];
     const start = new Date();
     start.setDate(start.getDate() - 179);
     let seed = 20260701;
@@ -222,7 +243,7 @@ const Parse = (function () {
       const weekend = dow === 0 || dow === 6 ? 1.35 : 1;
       for (const ch of channels) {
         const region = regions[Math.floor(rnd() * regions.length)];
-        const base = { '线上商城': 3200, '线下门店': 2400, '社群团购': 1500, '直播带货': 2600 }[ch];
+        const base = SAMPLE_BASE[ch];
         const trend = 1 + d / 260;
         let sales = base * trend * weekend * (0.75 + rnd() * 0.5);
         // 制造两处异常：一次大促峰值、一次系统故障导致的断崖
@@ -249,9 +270,14 @@ const Parse = (function () {
   }
 
   /* ---------- Stata / 统计软件格式 ---------- */
-  function isStata(fileName) { return /\.dta$/i.test(String(fileName || '')); }
+  function isStata(fileName: unknown): boolean { return /\.dta$/i.test(String(fileName || '')); }
 
-  async function fromStata(bytes) { const { Dta } = await import('./dta'); return Dta.read(bytes); }
+  async function fromStata(bytes: Uint8Array): Promise<ParsedTable> {
+    // dta.ts 还没加类型（仍是 @ts-nocheck），这里只声明 parse 侧关心的最小形状，
+    // 等它的独立 PR 补上类型后就可以直接 import type 而删掉这层断言。
+    const { Dta } = (await import('./dta')) as unknown as { Dta: StataTableReader };
+    return Dta.read(bytes);
+  }
 
   return {
     fromText, fromJSON, workbook, isExcel, isStata, fromStata,
