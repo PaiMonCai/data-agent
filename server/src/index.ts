@@ -8,6 +8,7 @@ import adminRoutes, { ensureBootstrapAdmin, setupStatus } from "./admin.js";
 import dataRoutes from "./data.js";
 import llmRoutes from "./llm.js";
 import { env, jsonError, prisma, type AppEnv } from "./lib.js";
+import { resolveLlmProviders } from "./llm-config.js";
 
 const app = new Hono<AppEnv>();
 
@@ -56,11 +57,13 @@ app.use("/api/*", async (c, next) => {
 app.get("/api/health", async (c) => {
   try {
     await prisma.$queryRawUnsafe("SELECT 1");
+    const providers = await resolveLlmProviders();
     return c.json({
       ok: true,
       service: "data-agent",
       database: "ok",
-      llmConfigured: Boolean(env.llmBaseUrl),
+      llmConfigured: providers.some((provider) => provider.enabled && Boolean(provider.baseUrl)),
+      llmProviders: providers.filter((provider) => provider.enabled).length,
       mailMode: env.mailMode,
     });
   } catch (e) {

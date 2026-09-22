@@ -33,9 +33,15 @@ const server = http.createServer(async (req, res) => {
       return json(res, 400, { error: { message: "invalid json" } });
     }
 
-    if (body.model !== "mock-model") {
+    if (!["mock-model", "mock-model-a", "mock-model-b"].includes(body.model)) {
       return json(res, 400, { error: { message: "unexpected model" } });
     }
+
+    const reply = body.model === "mock-model-a"
+      ? ["channel-", "a"]
+      : body.model === "mock-model-b"
+        ? ["channel-", "b"]
+        : ["hello ", "world"];
 
     if (body.stream) {
       res.writeHead(200, {
@@ -44,16 +50,16 @@ const server = http.createServer(async (req, res) => {
         Connection: "keep-alive",
         "X-Request-Id": "mock-stream-request",
       });
-      res.write('data: {"choices":[{"delta":{"content":"hello "}}]}\n\n');
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: reply[0] } }] })}\n\n`);
       await new Promise((resolve) => setTimeout(resolve, 20));
-      res.write('data: {"choices":[{"delta":{"content":"world"}}]}\n\n');
+      res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: reply[1] } }] })}\n\n`);
       res.end("data: [DONE]\n\n");
       return;
     }
 
     return json(res, 200, {
       choices: [
-        { message: { role: "assistant", content: "hello world" } },
+        { message: { role: "assistant", content: reply.join("") } },
       ],
     });
   }

@@ -135,6 +135,37 @@ export interface AdminMailSettings {
   source: "database" | "environment";
 }
 
+export interface AdminLlmProvider {
+  id: string;
+  name: string;
+  baseUrl: string;
+  models: string[];
+  enabled: boolean;
+  hasApiKey: boolean;
+  source: "database" | "environment";
+}
+
+export interface AdminLlmChannel {
+  id: string;
+  providerId: string;
+  upstreamModel: string;
+  enabled: boolean;
+}
+
+export interface AdminLlmModel {
+  id: string;
+  name: string;
+  enabled: boolean;
+  strategy: "round_robin";
+  channels: AdminLlmChannel[];
+}
+
+export interface AdminLlmSettings {
+  source: "database" | "environment";
+  providers: AdminLlmProvider[];
+  models: AdminLlmModel[];
+}
+
 const admin = {
   getMail: () => withAuthRetry(() => request<AdminMailSettings>("/admin/settings/mail")),
   saveMail: (payload: {
@@ -152,6 +183,38 @@ const admin = {
     method: "POST",
     body: JSON.stringify(email ? { email } : {}),
   })),
+  getLlm: () => withAuthRetry(() => request<AdminLlmSettings>("/admin/settings/llm")),
+  saveLlm: (payload: {
+    providers: Array<{
+      id: string;
+      name: string;
+      baseUrl: string;
+      apiKey?: string;
+      models: string[];
+      enabled: boolean;
+    }>;
+    models: Array<{
+      id: string;
+      name: string;
+      enabled: boolean;
+      strategy: "round_robin";
+      channels: Array<{
+        id: string;
+        providerId: string;
+        upstreamModel: string;
+        enabled: boolean;
+      }>;
+    }>;
+  }) => withAuthRetry(() => request<AdminLlmSettings>("/admin/settings/llm", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  })),
+  discoverLlmModels: (providerId: string) => withAuthRetry(() =>
+    request<{ models: string[] }>(`/admin/settings/llm/providers/${encodeURIComponent(providerId)}/discover`, {
+      method: "POST",
+      body: "{}",
+    })
+  ),
 };
 
 const db = {

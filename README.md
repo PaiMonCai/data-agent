@@ -8,10 +8,10 @@
 - 自然语言分析与数据清洗
 - 图表、表格、异常检测等结果展示
 - 分析历史记录
-- OpenAI-compatible 模型接入
+- 多个 OpenAI-compatible LLM 供应商、自定义模型渠道与轮询
 - 邮箱密码 + OTP 登录
 - 多用户数据隔离
-- 管理员后台配置 SMTP
+- 独立管理员页面（SMTP / LLM）
 - Docker 自托管部署
 
 ## 技术栈
@@ -54,6 +54,37 @@ docker compose up -d
 http://服务器IP:3000
 ```
 
+## 管理中心
+
+管理员登录后可以从主界面进入：
+
+```text
+/admin/
+```
+
+管理中心用于配置：
+
+- SMTP 邮件服务
+- OpenAI-compatible LLM 供应商
+- Provider Base URL / API Key
+- 每个 Provider 的模型渠道开关
+- 前端逻辑模型名 → 上游真实模型名映射
+- 同一逻辑模型的多渠道 Round Robin 轮询
+- 从 `/models` 自动导入上游模型
+
+LLM 与 SMTP 配置保存后立即生效，不需要重启容器。LLM API Key 与 SMTP 密码均使用 `SYSTEM_CONFIG_ENCRYPTION_KEY` 加密保存。
+
+例如可以把两个渠道：
+
+```text
+OpenAI  : gpt-5.6
+NewAPI  : gpt-5.6-2026
+```
+
+都映射成前端的 `gpt-5.6`。用户只会看到一个 `gpt-5.6`，后端按请求在所有启用渠道之间 Round Robin 轮询。管理员可以单独关闭任意渠道；只剩一个启用渠道时，该逻辑模型自然固定走这一路。
+
+如果后台还没有保存 LLM 配置，系统继续使用 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODELS` 环境变量作为兼容 fallback。
+
 ## 首次管理员与 SMTP
 
 首次部署不需要提前配置 SMTP。
@@ -68,7 +99,7 @@ BOOTSTRAP_ADMIN_PASSWORD
 创建管理员。之后直接使用管理员邮箱和密码登录，在：
 
 ```text
-设置 → 管理员 · 邮件服务
+/admin/ → 邮件服务
 ```
 
 中配置 SMTP，并发送测试邮件。

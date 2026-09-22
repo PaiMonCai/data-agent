@@ -12,6 +12,11 @@ import {
   sendTestMail,
   type AppEnv,
 } from "./lib.js";
+import {
+  discoverLlmModels,
+  publicLlmSettings,
+  saveLlmSettings,
+} from "./llm-config.js";
 
 const router = new Hono<AppEnv>();
 
@@ -33,6 +38,35 @@ const mailSchema = z.object({
   user: z.string().trim().max(255),
   password: z.string().max(1024).optional(),
   from: z.string().trim().min(1).max(320),
+});
+
+const llmProviderSchema = z.object({
+  id: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
+  name: z.string().trim().min(1).max(100),
+  baseUrl: z.string().trim().url().max(500),
+  apiKey: z.string().max(4096).optional(),
+  models: z.array(z.string().trim().min(1).max(200)).max(500),
+  enabled: z.boolean(),
+});
+
+const llmChannelSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  providerId: z.string().trim().min(1).max(64),
+  upstreamModel: z.string().trim().min(1).max(200),
+  enabled: z.boolean(),
+});
+
+const llmLogicalModelSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  name: z.string().trim().min(1).max(200),
+  enabled: z.boolean(),
+  strategy: z.literal("round_robin"),
+  channels: z.array(llmChannelSchema).max(100),
+});
+
+const llmSchema = z.object({
+  providers: z.array(llmProviderSchema).max(20),
+  models: z.array(llmLogicalModelSchema).max(200),
 });
 
 router.get("/settings/mail", async (c) => {
@@ -64,6 +98,56 @@ router.post("/settings/mail/test", async (c) => {
     }
     await sendTestMail(email);
     return c.json({ ok: true });
+  } catch (e) {
+    return jsonError(c, e);
+  }
+});
+
+router.get("/settings/llm", async (c) => {
+  try {
+    return c.json(await publicLlmSettings());
+  } catch (e) {
+    return jsonError(c, e);
+  }
+});
+
+router.patch("/settings/llm", async (c) => {
+  try {
+    const parsed = llmSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      throw new ApiError(400, "request_invalid", "LLM 供应商配置格式不正确");
+    }
+    const providerIds = parsed.data.providers.map((x) => x.id);
+    if (new Set(providerIds).size !== providerIds.length) {
+      throw new ApiError(400, "request_invalid", "LLM 供应商 ID 不能重复");
+    }
+
+    const modelIds = parsed.data.models.map((x) => x.id);
+    if (new Set(modelIds).size !== modelIds.length) {
+      throw new ApiError(400, "request_invalid", "逻辑模型 ID 不能重复");
+    }
+
+    for (const model of parsed.data.models) {
+      const channelIds = model.channels.map((x) => x.id);
+      if (new Set(channelIds).size !== channelIds.length) {
+        throw new ApiError(400, "request_invalid", `模型 ${model.id} 的渠道 ID 不能重复`);
+      }
+      for (const channel of model.channels) {
+        if (!providerIds.includes(channel.providerId)) {
+          throw new ApiError(400, "request_invalid", `模型 ${model.id} 存在无效供应商渠道`);
+        }
+      }
+    }
+
+    return c.json(await saveLlmSettings(parsed.data));
+  } catch (e) {
+    return jsonError(c, e);
+  }
+});
+
+router.post("/settings/llm/providers/:id/discover", async (c) => {
+  try {
+    return c.json(await discoverLlmModels(c.req.param("id")));
   } catch (e) {
     return jsonError(c, e);
   }

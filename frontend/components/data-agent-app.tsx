@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import {
-  BarChart3, ChevronDown, LogOut, Menu, Moon, Send, Settings, Sun, Table2, Trash2, Upload, Zap,
+  BarChart3, ChevronDown, LogOut, Menu, Moon, Send, Settings, Shield, Sun, Table2, Trash2, Upload, Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AuthView from "@/features/auth/components/auth-view";
@@ -198,7 +198,7 @@ export default function DataAgentApp() {
             <label className="sr-only" htmlFor="model-select">选择模型</label>
             <select id="model-select" value={model} onChange={(e) => setModel(e.target.value)} className="bg-transparent text-sm outline-none">
               {!models.length && <option value="">未配置模型</option>}
-              {models.map((m) => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}
+              {models.map((m) => <option key={m.id} value={m.id}>{m.provider ? `${m.provider} · ${m.name || m.id}` : (m.name || m.id)}</option>)}
             </select>
             <ChevronDown size={13} className="muted"/>
           </div>
@@ -207,6 +207,10 @@ export default function DataAgentApp() {
             className="muted rounded-lg p-2 hover:surface-2">{resolvedTheme === "dark" ? <Sun size={18}/> : <Moon size={18}/>}</button>
           <button onClick={() => setSettingsOpen(true)} aria-label="打开设置"
             className="muted rounded-lg p-2 hover:surface-2"><Settings size={18}/></button>
+          {user.role === "admin" && (
+            <a href="/admin/" aria-label="打开管理中心" title="管理中心"
+              className="muted rounded-lg p-2 hover:surface-2"><Shield size={18}/></a>
+          )}
           <button onClick={() => void logout()} aria-label="退出登录" title={user.email}
             className="muted rounded-lg p-2 hover:surface-2"><LogOut size={18}/></button>
         </div>
@@ -300,7 +304,7 @@ export default function DataAgentApp() {
       </div>
 
       {importOpen && <ImportDialog onClose={() => setImportOpen(false)} onImported={imported}/>}
-      {settingsOpen && <SettingsDialog settings={settingsState} onChange={updateSettings} models={models} user={user} onClose={() => setSettingsOpen(false)}/>}
+      {settingsOpen && <SettingsDialog settings={settingsState} onChange={updateSettings} models={models} onClose={() => setSettingsOpen(false)}/>} 
     </div>
   );
 }
