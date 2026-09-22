@@ -243,7 +243,7 @@ function ImportDialog({ onClose, onImported }: {
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/35 p-4 backdrop-blur-sm">
       <div className="surface max-h-[90vh] w-full max-w-2xl overflow-auto rounded-3xl border shadow-2xl">
         <div className="border-ui flex items-center justify-between border-b px-6 py-5">
-          <div><h2 className="text-lg font-semibold">新建数据集</h2><p className="muted mt-1 text-sm">支持 CSV / TSV / JSON / Excel .xlsx / Stata</p></div>
+          <div><h2 className="text-lg font-semibold">新建数据集</h2><p className="muted mt-1 text-sm">支持 CSV / TSV / JSON / Excel / ODS / Stata</p></div>
           <button onClick={onClose} className="muted rounded-lg p-2 hover:surface-2"><X size={19}/></button>
         </div>
 
@@ -266,7 +266,7 @@ function ImportDialog({ onClose, onImported }: {
               <Upload className="brand mb-3" />
               <span className="font-medium">选择文件</span>
               <span className="muted mt-2 text-sm">最大导入 20,000 行</span>
-              <input type="file" className="hidden" accept=".csv,.tsv,.txt,.json,.xlsx,.xlsm,.dta"
+              <input type="file" className="hidden" accept=".csv,.tsv,.txt,.json,.xlsx,.xls,.xlsb,.xlsm,.ods,.dta"
                 onChange={(e) => e.target.files?.[0] && void parseFile(e.target.files[0])}/>
             </label>
           )}
