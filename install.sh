@@ -1,37 +1,37 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-IMAGE="\${DATA_AGENT_IMAGE:-ghcr.io/paimoncai/data-agent:latest}"
-INSTALL_DIR="\${DATA_AGENT_INSTALL_DIR:-/opt/data-agent}"
-APP_PORT="\${DATA_AGENT_APP_PORT:-3000}"
-APP_BIND="\${DATA_AGENT_APP_BIND:-}"
-APP_ORIGIN="\${DATA_AGENT_APP_ORIGIN:-}"
-ACCESS_MODE="\${DATA_AGENT_ACCESS_MODE:-}"
-ADMIN_EMAIL="\${DATA_AGENT_ADMIN_EMAIL:-}"
-ADMIN_PASSWORD="\${DATA_AGENT_ADMIN_PASSWORD:-}"
-SESSION_SECRET="\${DATA_AGENT_SESSION_SECRET:-}"
-SYSTEM_CONFIG_ENCRYPTION_KEY="\${DATA_AGENT_SYSTEM_CONFIG_ENCRYPTION_KEY:-}"
-LLM_BASE_URL="\${DATA_AGENT_LLM_BASE_URL:-}"
-LLM_API_KEY="\${DATA_AGENT_LLM_API_KEY:-}"
-LLM_MODELS="\${DATA_AGENT_LLM_MODELS:-}"
-DB_MODE="\${DATA_AGENT_DB_MODE:-}"
-DATABASE_URL="\${DATA_AGENT_DATABASE_URL:-}"
-DB_CONTAINER="\${DATA_AGENT_DB_CONTAINER:-}"
-DB_DATABASE="\${DATA_AGENT_DB_DATABASE:-data_agent}"
-DB_USERNAME="\${DATA_AGENT_DB_USERNAME:-data_agent}"
-DB_PASSWORD="\${DATA_AGENT_DB_PASSWORD:-}"
-DB_ADMIN_USER="\${DATA_AGENT_DB_ADMIN_USER:-}"
-DB_ADMIN_PASSWORD="\${DATA_AGENT_DB_ADMIN_PASSWORD:-}"
-DB_LINK_NETWORK="\${DATA_AGENT_DB_LINK_NETWORK:-data-agent-db-link}"
-DB_PROXY_PORT="\${DATA_AGENT_DB_PROXY_PORT:-15432}"
-DEPLOY_RAW_BASE="\${DATA_AGENT_DEPLOY_RAW_BASE:-https://raw.githubusercontent.com/PaiMonCai/data-agent/main}"
+IMAGE="${DATA_AGENT_IMAGE:-ghcr.io/paimoncai/data-agent:latest}"
+INSTALL_DIR="${DATA_AGENT_INSTALL_DIR:-/opt/data-agent}"
+APP_PORT="${DATA_AGENT_APP_PORT:-3000}"
+APP_BIND="${DATA_AGENT_APP_BIND:-}"
+APP_ORIGIN="${DATA_AGENT_APP_ORIGIN:-}"
+ACCESS_MODE="${DATA_AGENT_ACCESS_MODE:-}"
+ADMIN_EMAIL="${DATA_AGENT_ADMIN_EMAIL:-}"
+ADMIN_PASSWORD="${DATA_AGENT_ADMIN_PASSWORD:-}"
+SESSION_SECRET="${DATA_AGENT_SESSION_SECRET:-}"
+SYSTEM_CONFIG_ENCRYPTION_KEY="${DATA_AGENT_SYSTEM_CONFIG_ENCRYPTION_KEY:-}"
+LLM_BASE_URL="${DATA_AGENT_LLM_BASE_URL:-}"
+LLM_API_KEY="${DATA_AGENT_LLM_API_KEY:-}"
+LLM_MODELS="${DATA_AGENT_LLM_MODELS:-}"
+DB_MODE="${DATA_AGENT_DB_MODE:-}"
+DATABASE_URL="${DATA_AGENT_DATABASE_URL:-}"
+DB_CONTAINER="${DATA_AGENT_DB_CONTAINER:-}"
+DB_DATABASE="${DATA_AGENT_DB_DATABASE:-data_agent}"
+DB_USERNAME="${DATA_AGENT_DB_USERNAME:-data_agent}"
+DB_PASSWORD="${DATA_AGENT_DB_PASSWORD:-}"
+DB_ADMIN_USER="${DATA_AGENT_DB_ADMIN_USER:-}"
+DB_ADMIN_PASSWORD="${DATA_AGENT_DB_ADMIN_PASSWORD:-}"
+DB_LINK_NETWORK="${DATA_AGENT_DB_LINK_NETWORK:-data-agent-db-link}"
+DB_PROXY_PORT="${DATA_AGENT_DB_PROXY_PORT:-15432}"
+DEPLOY_RAW_BASE="${DATA_AGENT_DEPLOY_RAW_BASE:-https://raw.githubusercontent.com/PaiMonCai/data-agent/main}"
 ASSUME_YES=0
 RENDER_ONLY=0
 RESET_LOCAL_DB=0
-AUTO_INSTALL_DOCKER="\${DATA_AGENT_AUTO_INSTALL_DOCKER:-false}"
+AUTO_INSTALL_DOCKER="${DATA_AGENT_AUTO_INSTALL_DOCKER:-false}"
 GENERATED_ADMIN_PASSWORD=""
 COMPOSE_PROJECT_NAME="data-agent"
-LOCAL_DB_VOLUME="\${COMPOSE_PROJECT_NAME}_postgres-data"
+LOCAL_DB_VOLUME="${COMPOSE_PROJECT_NAME}_postgres-data"
 
 log()  { printf '\033[1;34m[Data Agent]\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m[Data Agent]\033[0m %s\n' "$*"; }
@@ -41,8 +41,8 @@ die()  { printf '\033[1;31m[Data Agent]\033[0m %s\n' "$*" >&2; exit 1; }
 on_error() {
   local code=$?
   printf '\n' >&2
-  warn "installation failed near line \${BASH_LINENO[0]:-?} (exit $code)"
-  if [[ -n "\${INSTALL_DIR:-}" && -f "$INSTALL_DIR/compose.yaml" ]]; then
+  warn "installation failed near line ${BASH_LINENO[0]:-?} (exit $code)"
+  if [[ -n "${INSTALL_DIR:-}" && -f "$INSTALL_DIR/compose.yaml" ]]; then
     warn "inspect with: cd $INSTALL_DIR && docker compose logs --tail=200 app"
   fi
   exit "$code"
@@ -100,14 +100,14 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dir) INSTALL_DIR="\${2:?missing value for --dir}"; shift 2 ;;
-    --image) IMAGE="\${2:?missing value for --image}"; shift 2 ;;
-    --port) APP_PORT="\${2:?missing value for --port}"; shift 2 ;;
-    --origin) APP_ORIGIN="\${2:?missing value for --origin}"; shift 2 ;;
-    --email) ADMIN_EMAIL="\${2:?missing value for --email}"; shift 2 ;;
-    --db-mode) DB_MODE="\${2:?missing value for --db-mode}"; shift 2 ;;
-    --db-url) DATABASE_URL="\${2:?missing value for --db-url}"; shift 2 ;;
-    --db-container) DB_CONTAINER="\${2:?missing value for --db-container}"; shift 2 ;;
+    --dir) INSTALL_DIR="${2:?missing value for --dir}"; shift 2 ;;
+    --image) IMAGE="${2:?missing value for --image}"; shift 2 ;;
+    --port) APP_PORT="${2:?missing value for --port}"; shift 2 ;;
+    --origin) APP_ORIGIN="${2:?missing value for --origin}"; shift 2 ;;
+    --email) ADMIN_EMAIL="${2:?missing value for --email}"; shift 2 ;;
+    --db-mode) DB_MODE="${2:?missing value for --db-mode}"; shift 2 ;;
+    --db-url) DATABASE_URL="${2:?missing value for --db-url}"; shift 2 ;;
+    --db-container) DB_CONTAINER="${2:?missing value for --db-container}"; shift 2 ;;
     --yes) ASSUME_YES=1; shift ;;
     --reset-local-db) RESET_LOCAL_DB=1; shift ;;
     --render-only) RENDER_ONLY=1; ASSUME_YES=1; shift ;;
@@ -117,7 +117,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 prompt() {
-  local label="$1" default="\${2-}" value=""
+  local label="$1" default="${2-}" value=""
   if [[ "$ASSUME_YES" -eq 1 ]]; then
     printf '%s' "$default"
     return
@@ -128,11 +128,11 @@ prompt() {
     printf '%s: ' "$label" > /dev/tty
   fi
   IFS= read -r value < /dev/tty || true
-  printf '%s' "\${value:-$default}"
+  printf '%s' "${value:-$default}"
 }
 
 prompt_secret() {
-  local label="$1" default="\${2-}" value=""
+  local label="$1" default="${2-}" value=""
   if [[ "$ASSUME_YES" -eq 1 ]]; then
     printf '%s' "$default"
     return
@@ -140,7 +140,7 @@ prompt_secret() {
   printf '%s: ' "$label" > /dev/tty
   IFS= read -r -s value < /dev/tty || true
   printf '\n' > /dev/tty
-  printf '%s' "\${value:-$default}"
+  printf '%s' "${value:-$default}"
 }
 
 choose() {
@@ -156,7 +156,7 @@ choose() {
 }
 
 confirm() {
-  local label="$1" default="\${2:-Y}" value=""
+  local label="$1" default="${2:-Y}" value=""
   if [[ "$ASSUME_YES" -eq 1 ]]; then
     [[ "$default" =~ ^[Yy]$ ]]
     return
@@ -178,7 +178,7 @@ valid_origin() {
 }
 
 random_hex() {
-  local bytes="\${1:-32}"
+  local bytes="${1:-32}"
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex "$bytes"
   else
@@ -192,7 +192,7 @@ detect_host() {
     host="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')"
   fi
   [[ -n "$host" ]] || host="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
-  printf '%s' "\${host:-127.0.0.1}"
+  printf '%s' "${host:-127.0.0.1}"
 }
 
 dotenv_quote() {
@@ -208,7 +208,7 @@ ensure_docker() {
     return
   fi
 
-  local auto="\${AUTO_INSTALL_DOCKER,,}"
+  local auto="${AUTO_INSTALL_DOCKER,,}"
   if [[ "$ASSUME_YES" -eq 0 ]]; then
     confirm "Docker + Compose v2 not found. Install Docker automatically?" "Y" ||
       die "Docker Engine + Compose v2 are required"
@@ -216,7 +216,7 @@ ensure_docker() {
     die "Docker + Compose v2 are required. Set DATA_AGENT_AUTO_INSTALL_DOCKER=true for unattended automatic installation."
   fi
 
-  [[ \${EUID:-$(id -u)} -eq 0 ]] || die "automatic Docker installation requires root"
+  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "automatic Docker installation requires root"
   local tmp="/tmp/data-agent-get-docker.sh"
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL https://get.docker.com -o "$tmp"
@@ -233,7 +233,7 @@ ensure_docker() {
 
 load_database_module() {
   local script_dir tmp
-  script_dir="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
   if [[ -n "$script_dir" && -f "$script_dir/deploy/install-database.sh" ]]; then
     # shellcheck source=/dev/null
     source "$script_dir/deploy/install-database.sh"
@@ -284,14 +284,14 @@ EOF
         domain="$(prompt "Public domain or origin" "https://data.example.com")"
         [[ "$domain" != *"example.com"* ]] || die "enter your real domain"
         [[ "$domain" == http://* || "$domain" == https://* ]] || domain="https://$domain"
-        APP_ORIGIN="\${domain%/}"
+        APP_ORIGIN="${domain%/}"
       fi
       valid_origin "$APP_ORIGIN" || die "invalid APP_ORIGIN: $APP_ORIGIN"
-      APP_BIND="\${APP_BIND:-127.0.0.1}"
+      APP_BIND="${APP_BIND:-127.0.0.1}"
       COOKIE_SECURE=true
       ;;
     http)
-      APP_BIND="\${APP_BIND:-0.0.0.0}"
+      APP_BIND="${APP_BIND:-0.0.0.0}"
       if [[ -z "$APP_ORIGIN" ]]; then
         local host
         host="$(detect_host)"
@@ -316,7 +316,7 @@ configure_admin() {
     die "--yes requires --email or DATA_AGENT_ADMIN_EMAIL"
   fi
 
-  ADMIN_EMAIL="$(prompt "Administrator email" "\${ADMIN_EMAIL:-admin@example.com}")"
+  ADMIN_EMAIL="$(prompt "Administrator email" "${ADMIN_EMAIL:-admin@example.com}")"
   valid_email "$ADMIN_EMAIL" && [[ "$ADMIN_EMAIL" != "admin@example.com" ]] ||
     die "enter a valid administrator email"
 
@@ -327,10 +327,10 @@ configure_admin() {
     ADMIN_PASSWORD="$(random_hex 12)"
     GENERATED_ADMIN_PASSWORD="$ADMIN_PASSWORD"
   fi
-  (("\${#ADMIN_PASSWORD}" >= 8)) || die "administrator password must be at least 8 characters"
+  (("${#ADMIN_PASSWORD}" >= 8)) || die "administrator password must be at least 8 characters"
 
-  SESSION_SECRET="\${SESSION_SECRET:-$(random_hex 32)}"
-  SYSTEM_CONFIG_ENCRYPTION_KEY="\${SYSTEM_CONFIG_ENCRYPTION_KEY:-$(random_hex 32)}"
+  SESSION_SECRET="${SESSION_SECRET:-$(random_hex 32)}"
+  SYSTEM_CONFIG_ENCRYPTION_KEY="${SYSTEM_CONFIG_ENCRYPTION_KEY:-$(random_hex 32)}"
 }
 
 configure_llm() {
@@ -338,7 +338,7 @@ configure_llm() {
     return
   fi
   if confirm "Configure a default OpenAI-compatible LLM now? (can also be done in /admin later)" "N"; then
-    LLM_BASE_URL="$(prompt "LLM Base URL" "\${LLM_BASE_URL:-https://api.openai.com/v1}")"
+    LLM_BASE_URL="$(prompt "LLM Base URL" "${LLM_BASE_URL:-https://api.openai.com/v1}")"
     LLM_API_KEY="$(prompt_secret "LLM API Key" "$LLM_API_KEY")"
     LLM_MODELS="$(prompt "Models (comma-separated, optional)" "$LLM_MODELS")"
   fi
@@ -424,7 +424,7 @@ services:
 $DATABASE_SERVICE_BLOCK
 $DB_PROXY_SERVICE_BLOCK
   app:
-    image: \${DATA_AGENT_IMAGE:-ghcr.io/paimoncai/data-agent:latest}
+    image: ${DATA_AGENT_IMAGE:-ghcr.io/paimoncai/data-agent:latest}
     pull_policy: always
     restart: unless-stopped
 $APP_DB_DEPENDS_BLOCK
@@ -433,31 +433,31 @@ $DB_NETWORKS_BLOCK
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: \${DATABASE_URL:?missing DATABASE_URL}
-      SESSION_SECRET: \${SESSION_SECRET:?missing SESSION_SECRET}
-      SYSTEM_CONFIG_ENCRYPTION_KEY: \${SYSTEM_CONFIG_ENCRYPTION_KEY:?missing SYSTEM_CONFIG_ENCRYPTION_KEY}
-      BOOTSTRAP_ADMIN_EMAIL: \${BOOTSTRAP_ADMIN_EMAIL:-}
-      BOOTSTRAP_ADMIN_PASSWORD: \${BOOTSTRAP_ADMIN_PASSWORD:-}
-      SESSION_DAYS: \${SESSION_DAYS:-30}
-      COOKIE_SECURE: \${COOKIE_SECURE:-false}
-      COOKIE_SAME_SITE: \${COOKIE_SAME_SITE:-Lax}
-      APP_ORIGIN: \${APP_ORIGIN:-}
-      LLM_BASE_URL: \${LLM_BASE_URL:-}
-      LLM_API_KEY: \${LLM_API_KEY:-}
-      LLM_MODELS: \${LLM_MODELS:-}
-      LLM_REQUESTS_PER_MINUTE: \${LLM_REQUESTS_PER_MINUTE:-10}
-      LLM_REQUESTS_PER_DAY: \${LLM_REQUESTS_PER_DAY:-300}
-      LLM_MAX_INPUT_CHARS: \${LLM_MAX_INPUT_CHARS:-200000}
-      LLM_TIMEOUT_MS: \${LLM_TIMEOUT_MS:-180000}
-      MAIL_MODE: \${MAIL_MODE:-console}
-      SMTP_HOST: \${SMTP_HOST:-}
-      SMTP_PORT: \${SMTP_PORT:-587}
-      SMTP_SECURE: \${SMTP_SECURE:-false}
-      SMTP_USER: \${SMTP_USER:-}
-      SMTP_PASS: \${SMTP_PASS:-}
-      SMTP_FROM: \${SMTP_FROM:-Data Agent <no-reply@example.com>}
+      DATABASE_URL: ${DATABASE_URL:?missing DATABASE_URL}
+      SESSION_SECRET: ${SESSION_SECRET:?missing SESSION_SECRET}
+      SYSTEM_CONFIG_ENCRYPTION_KEY: ${SYSTEM_CONFIG_ENCRYPTION_KEY:?missing SYSTEM_CONFIG_ENCRYPTION_KEY}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      SESSION_DAYS: ${SESSION_DAYS:-30}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-Lax}
+      APP_ORIGIN: ${APP_ORIGIN:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODELS: ${LLM_MODELS:-}
+      LLM_REQUESTS_PER_MINUTE: ${LLM_REQUESTS_PER_MINUTE:-10}
+      LLM_REQUESTS_PER_DAY: ${LLM_REQUESTS_PER_DAY:-300}
+      LLM_MAX_INPUT_CHARS: ${LLM_MAX_INPUT_CHARS:-200000}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-180000}
+      MAIL_MODE: ${MAIL_MODE:-console}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-Data Agent <no-reply@example.com>}
     ports:
-      - "\${APP_BIND:-0.0.0.0}:\${APP_PORT:-3000}:3000"
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-3000}:3000"
     healthcheck:
       test:
         - CMD
