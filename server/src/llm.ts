@@ -1,23 +1,18 @@
 import { Hono } from "hono";
 import { ApiError, authRequired, env, jsonError, prisma, type AppEnv } from "./lib.js";
+import { listPublicModels, resolveRequestedModel } from "./llm-config.js";
 
 const router = new Hono<AppEnv>();
 router.use("*", authRequired);
 
 let lastRateCleanup = 0;
 
-function ensureConfigured() {
-  if (!env.llmBaseUrl) {
-    throw new ApiError(503, "llm_not_configured", "LLM_BASE_URL 尚未配置");
-  }
-}
-
-function upstreamHeaders(extra?: Record<string, string>) {
+function upstreamHeaders(apiKey: string, extra?: Record<string, string>) {
   const headers: Record<string, string> = {
     Accept: "application/json",
     ...extra,
   };
-  if (env.llmApiKey) headers.Authorization = `Bearer ${env.llmApiKey}`;
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   return headers;
 }
 
@@ -109,51 +104,14 @@ function rateHeaders(state: { minuteUsed: number; dayUsed: number }) {
 
 router.get("/models", async (c) => {
   try {
-    if (env.llmModels.length) {
-      return c.json({
-        data: env.llmModels.map((id) => ({
-          id,
-          name: id,
-          provider: "Self-hosted",
-        })),
-      });
-    }
-
-    ensureConfigured();
-    const res = await fetch(`${env.llmBaseUrl}/models`, {
-      headers: upstreamHeaders(),
-      signal: AbortSignal.timeout(Math.min(env.llmTimeoutMs, 30_000)),
-    });
-
-    const text = await res.text();
-    const type = res.headers.get("content-type") || "application/json";
-
-    if (!res.ok) {
-      return new Response(text, {
-        status: res.status,
-        headers: { "Content-Type": type },
-      });
-    }
-
-    return new Response(text, {
-      status: 200,
-      headers: {
-        "Content-Type": type,
-        "Cache-Control": "private, max-age=60",
-      },
-    });
+    return c.json({ data: await listPublicModels() });
   } catch (e) {
-    if (e instanceof DOMException && e.name === "TimeoutError") {
-      return jsonError(c, new ApiError(504, "llm_timeout", "模型服务响应超时"));
-    }
     return jsonError(c, e);
   }
 });
 
 router.post("/chat/completions", async (c) => {
   try {
-    ensureConfigured();
-
     const body = await c.req.json().catch(() => null);
     if (!body || typeof body !== "object") {
       throw new ApiError(400, "request_invalid", "请求体必须是 JSON");
@@ -177,6 +135,7 @@ router.post("/chat/completions", async (c) => {
       );
     }
 
+    const requested = await resolveRequestedModel(body.model.trim());
     const user = c.get("user");
     const rate = await consumeRateLimit(user.id);
 
@@ -185,13 +144,14 @@ router.post("/chat/completions", async (c) => {
       AbortSignal.timeout(env.llmTimeoutMs),
     ]);
 
-    const upstream = await fetch(`${env.llmBaseUrl}/chat/completions`, {
+    const upstreamBody = { ...body, model: requested.model };
+    const upstream = await fetch(`${requested.provider.baseUrl}/chat/completions`, {
       method: "POST",
-      headers: upstreamHeaders({
+      headers: upstreamHeaders(requested.provider.apiKey, {
         "Content-Type": "application/json",
         Accept: body.stream ? "text/event-stream, application/json" : "application/json",
       }),
-      body: JSON.stringify(body),
+      body: JSON.stringify(upstreamBody),
       signal,
     });
 
