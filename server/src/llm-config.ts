@@ -1,14 +1,22 @@
 import { ApiError, decryptSystemSecret, encryptSystemSecret, env, prisma } from "./lib.js";
 
+export type LlmModelChannel = {
+  publicModel: string;
+  upstreamModel: string;
+  enabled: boolean;
+};
+
 export type LlmProviderConfig = {
   id: string;
   name: string;
   baseUrl: string;
   apiKey: string;
-  models: string[];
+  models: LlmModelChannel[];
   enabled: boolean;
   source: "database" | "environment";
 };
+
+export type LlmRoutingStrategy = "round_robin" | "priority";
 
 type StoredProvider = {
   id?: unknown;
@@ -19,9 +27,38 @@ type StoredProvider = {
   enabled?: unknown;
 };
 
-function cleanModels(value: unknown) {
+function cleanModelChannels(value: unknown): LlmModelChannel[] {
   const list = Array.isArray(value) ? value : [];
-  return [...new Set(list.map((x) => String(x).trim()).filter(Boolean))].slice(0, 200);
+  const out: LlmModelChannel[] = [];
+  for (const item of list) {
+    if (typeof item === "string") {
+      const model = item.trim();
+      if (model) out.push({ publicModel: model, upstreamModel: model, enabled: true });
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const publicModel = String(row.publicModel || row.model || "").trim();
+    const upstreamModel = String(row.upstreamModel || publicModel).trim();
+    if (!publicModel || !upstreamModel) continue;
+    out.push({
+      publicModel,
+      upstreamModel,
+      enabled: row.enabled !== false,
+    });
+  }
+  return out.slice(0, 500);
+}
+
+function cleanRouting(value: unknown): Record<string, LlmRoutingStrategy> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, LlmRoutingStrategy> = {};
+  for (const [model, strategy] of Object.entries(value as Record<string, unknown>)) {
+    const key = model.trim();
+    if (!key) continue;
+    out[key] = strategy === "priority" ? "priority" : "round_robin";
+  }
+  return out;
 }
 
 function normalizeBaseUrl(value: unknown) {
@@ -35,14 +72,22 @@ function envProvider(): LlmProviderConfig | null {
     name: "Environment",
     baseUrl: env.llmBaseUrl,
     apiKey: env.llmApiKey,
-    models: [...env.llmModels],
+    models: env.llmModels.map((model) => ({
+      publicModel: model,
+      upstreamModel: model,
+      enabled: true,
+    })),
     enabled: true,
     source: "environment",
   };
 }
 
+async function rawLlmSetting() {
+  return prisma.systemSetting.findUnique({ where: { key: "llm" } });
+}
+
 export async function resolveLlmProviders(): Promise<LlmProviderConfig[]> {
-  const stored = await prisma.systemSetting.findUnique({ where: { key: "llm" } });
+  const stored = await rawLlmSetting();
   const raw = (stored?.value || {}) as Record<string, unknown>;
 
   if (stored && Array.isArray(raw.providers)) {
@@ -52,7 +97,7 @@ export async function resolveLlmProviders(): Promise<LlmProviderConfig[]> {
         name: String(item.name || item.id || "").trim(),
         baseUrl: normalizeBaseUrl(item.baseUrl),
         apiKey: decryptSystemSecret(String(item.apiKey || "")),
-        models: cleanModels(item.models),
+        models: cleanModelChannels(item.models),
         enabled: item.enabled !== false,
         source: "database" as const,
       }))
@@ -63,8 +108,14 @@ export async function resolveLlmProviders(): Promise<LlmProviderConfig[]> {
   return fallback ? [fallback] : [];
 }
 
+export async function resolveRouting() {
+  const stored = await rawLlmSetting();
+  const raw = (stored?.value || {}) as Record<string, unknown>;
+  return cleanRouting(raw.routing);
+}
+
 export async function publicLlmSettings() {
-  const providers = await resolveLlmProviders();
+  const [providers, routing] = await Promise.all([resolveLlmProviders(), resolveRouting()]);
   return {
     source: providers.some((x) => x.source === "database") ? "database" as const : "environment" as const,
     providers: providers.map((p) => ({
@@ -76,6 +127,7 @@ export async function publicLlmSettings() {
       hasApiKey: Boolean(p.apiKey),
       source: p.source,
     })),
+    routing,
   };
 }
 
@@ -85,11 +137,12 @@ export async function saveLlmSettings(input: {
     name: string;
     baseUrl: string;
     apiKey?: string;
-    models: string[];
+    models: LlmModelChannel[];
     enabled: boolean;
   }>;
+  routing?: Record<string, LlmRoutingStrategy>;
 }) {
-  const previous = await prisma.systemSetting.findUnique({ where: { key: "llm" } });
+  const previous = await rawLlmSetting();
   const oldRaw = (previous?.value || {}) as Record<string, unknown>;
   const oldProviders = Array.isArray(oldRaw.providers) ? oldRaw.providers as StoredProvider[] : [];
   const effective = await resolveLlmProviders();
@@ -107,15 +160,17 @@ export async function saveLlmSettings(input: {
       name: provider.name,
       baseUrl: normalizeBaseUrl(provider.baseUrl),
       apiKey: key,
-      models: cleanModels(provider.models),
+      models: cleanModelChannels(provider.models),
       enabled: provider.enabled,
     };
   });
 
+  const routing = cleanRouting(input.routing || oldRaw.routing);
+
   await prisma.systemSetting.upsert({
     where: { key: "llm" },
-    create: { key: "llm", value: { providers } },
-    update: { value: { providers } },
+    create: { key: "llm", value: { providers, routing } },
+    update: { value: { providers, routing } },
   });
 
   return publicLlmSettings();
@@ -163,62 +218,43 @@ export async function discoverLlmModels(providerId: string) {
   return { models };
 }
 
-export function publicModelId(provider: LlmProviderConfig, model: string, providerCount: number) {
-  if (provider.source === "environment" && providerCount === 1) return model;
-  return `${provider.id}::${model}`;
-}
+const rrCursor = new Map<string, number>();
 
 export async function resolveRequestedModel(requested: string) {
-  const providers = (await resolveLlmProviders()).filter((x) => x.enabled);
-  if (!providers.length) throw new ApiError(503, "llm_not_configured", "尚未配置可用的 LLM 供应商");
+  const [providers, routing] = await Promise.all([resolveLlmProviders(), resolveRouting()]);
+  const channels = providers
+    .filter((provider) => provider.enabled)
+    .flatMap((provider) =>
+      provider.models
+        .filter((model) => model.enabled && model.publicModel === requested)
+        .map((model) => ({ provider, model: model.upstreamModel }))
+    );
 
-  if (requested.includes("::")) {
-    const idx = requested.indexOf("::");
-    const providerId = requested.slice(0, idx);
-    const model = requested.slice(idx + 2);
-    const provider = providers.find((x) => x.id === providerId);
-    if (!provider || !model) throw new ApiError(400, "llm_model_invalid", "模型配置不存在或已停用");
-    if (provider.models.length && !provider.models.includes(model)) {
-      throw new ApiError(400, "llm_model_invalid", "模型不在该供应商的启用列表中");
-    }
-    return { provider, model };
+  if (!channels.length) {
+    throw new ApiError(400, "llm_model_invalid", "模型不存在或没有可用渠道");
   }
 
-  if (providers.length === 1) {
-    const provider = providers[0];
-    if (provider.models.length && !provider.models.includes(requested)) {
-      throw new ApiError(400, "llm_model_invalid", "模型不在供应商的启用列表中");
-    }
-    return { provider, model: requested };
-  }
+  const strategy = routing[requested] || "round_robin";
+  if (strategy === "priority" || channels.length === 1) return channels[0];
 
-  const matches = providers.filter((x) => !x.models.length || x.models.includes(requested));
-  if (matches.length !== 1) {
-    throw new ApiError(400, "llm_model_ambiguous", "模型名称无法唯一匹配供应商，请重新选择模型");
-  }
-  return { provider: matches[0], model: requested };
+  const cursor = rrCursor.get(requested) || 0;
+  const selected = channels[cursor % channels.length];
+  rrCursor.set(requested, (cursor + 1) % channels.length);
+  return selected;
 }
 
 export async function listPublicModels() {
   const providers = (await resolveLlmProviders()).filter((x) => x.enabled);
-  const out: Array<{ id: string; name: string; provider: string }> = [];
+  const names = new Set<string>();
 
   for (const provider of providers) {
-    let models = provider.models;
-    if (!models.length) {
-      try {
-        models = (await discoverLlmModels(provider.id)).models;
-      } catch {
-        models = [];
-      }
-    }
-    for (const model of models) {
-      out.push({
-        id: publicModelId(provider, model, providers.length),
-        name: model,
-        provider: provider.name,
-      });
+    for (const model of provider.models) {
+      if (model.enabled) names.add(model.publicModel);
     }
   }
-  return out;
+
+  return [...names].sort().map((model) => ({
+    id: model,
+    name: model,
+  }));
 }
