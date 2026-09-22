@@ -16,27 +16,27 @@ export default function SettingsDialog({ settings, onChange, models, onClose }: 
     <div className="fixed inset-0 z-50 flex justify-end bg-black/25 backdrop-blur-sm">
       <div className="surface h-full w-full max-w-md border-l p-6 shadow-2xl">
         <div className="mb-7 flex items-center justify-between">
-          <div><h2 className="text-lg font-semibold">è®¾ç½®</h2><p className="muted mt-1 text-sm">åå¥½ä¿å­å¨å½åæµè§å¨</p></div>
-          <button onClick={onClose} className="muted rounded-lg p-2 hover:surface-2"><X size={19}/></button>
+          <div><h2 className="text-lg font-semibold">设置</h2><p className="muted mt-1 text-sm">偏好保存在当前浏览器</p></div>
+          <button onClick={onClose} aria-label="关闭设置" className="muted rounded-lg p-2 hover:surface-2"><X size={19}/></button>
         </div>
         <div className="space-y-6">
-          <SettingSelect label="ä¸»é¢" value={settings.theme} onChange={(v) => set("theme", v as AppSettings["theme"])}
-            options={[["system","è·éç³»ç»"],["light","æµè²"],["dark","æ·±è²"]]}/>
-          <SettingSelect label="é»è®¤æ¨¡å" value={settings.model} onChange={(v) => set("model", v)}
-            options={[["","èªå¨éæ©"], ...models.map((m) => [m.id, m.name || m.id] as [string,string])]}/>
-          <SettingSelect label="é»è®¤èå" value={settings.agg} onChange={(v) => set("agg", v as AppSettings["agg"])}
-            options={[["sum","æ±å"],["avg","å¹³åå¼"],["count","è®¡æ°"],["max","æå¤§å¼"],["min","æå°å¼"]]}/>
-          <SettingSelect label="æ¶é´ç²åº¦" value={settings.granularity} onChange={(v) => set("granularity", v as AppSettings["granularity"])}
-            options={[["auto","èªå¨"],["day","æ¥"],["week","å¨"],["month","æ"],["quarter","å­£åº¦"]]}/>
-          <SettingSelect label="å¼å¸¸æ£æµ" value={settings.sensitivity} onChange={(v) => set("sensitivity", v as AppSettings["sensitivity"])}
-            options={[["strict","ä¸¥æ ¼"],["normal","æ å"],["loose","å®½æ¾"]]}/>
-          <SettingSelect label="ç»è®ºè¯¦ç»åº¦" value={settings.detail} onChange={(v) => set("detail", v as AppSettings["detail"])}
-            options={[["brief","ç²¾ç®"],["normal","æ å"],["detailed","è¯¦ç»"]]}/>
-          <SettingToggle label="å¯¼å¥åèªå¨åæ" value={settings.autoAnalyze} onChange={(v) => set("autoAnalyze", v)}/>
-          <SettingToggle label="å é¤åç¡®è®¤" value={settings.confirmDelete} onChange={(v) => set("confirmDelete", v)}/>
+          <SettingSelect label="主题" value={settings.theme} onChange={(v) => set("theme", v as AppSettings["theme"])}
+            options={[["system","跟随系统"],["light","浅色"],["dark","深色"]]}/>
+          <SettingSelect label="默认模型" value={settings.model} onChange={(v) => set("model", v)}
+            options={[["","自动选择"], ...models.map((m) => [m.id, m.name || m.id] as [string,string])]}/>
+          <SettingSelect label="默认聚合" value={settings.agg} onChange={(v) => set("agg", v as AppSettings["agg"])}
+            options={[["sum","求和"],["avg","平均值"],["count","计数"],["max","最大值"],["min","最小值"]]}/>
+          <SettingSelect label="时间粒度" value={settings.granularity} onChange={(v) => set("granularity", v as AppSettings["granularity"])}
+            options={[["auto","自动"],["day","日"],["week","周"],["month","月"],["quarter","季度"]]}/>
+          <SettingSelect label="异常检测" value={settings.sensitivity} onChange={(v) => set("sensitivity", v as AppSettings["sensitivity"])}
+            options={[["strict","严格"],["normal","标准"],["loose","宽松"]]}/>
+          <SettingSelect label="结论详细度" value={settings.detail} onChange={(v) => set("detail", v as AppSettings["detail"])}
+            options={[["brief","精简"],["normal","标准"],["detailed","详细"]]}/>
+          <SettingToggle label="导入后自动分析" value={settings.autoAnalyze} onChange={(v) => set("autoAnalyze", v)}/>
+          <SettingToggle label="删除前确认" value={settings.confirmDelete} onChange={(v) => set("confirmDelete", v)}/>
           <button onClick={() => onChange(defaultSettings)}
             className="surface border-ui flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm">
-            <RotateCcw size={15}/>æ¢å¤é»è®¤
+            <RotateCcw size={15}/>恢复默认
           </button>
         </div>
       </div>

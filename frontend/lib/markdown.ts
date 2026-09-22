@@ -1,8 +1,8 @@
-/* é¶ä¾èµçè½»é Markdown è§£æå¨ã
+/* 零依赖的轻量 Markdown 解析器。
  *
- * åªè¦çæ¬é¡¹ç®æ¨¡åè¾åºä¼ç¨å°çè¯­æ³ï¼æ é¢ãæ®µè½ãåè¡¨ãå¼ç¨ãä»£ç åãåéçº¿ãè¡¨æ ¼ï¼
- * ä»¥åè¡åçå ç²/æä½/è¡åä»£ç /å é¤çº¿/é¾æ¥ãå»æä¸åå®æ´ CommonMarkï¼ä¹ä¸æ¥ç¬¬ä¸æ¹åºï¼
- * è¿æ ·é¦å±åä½ç§¯åå®è£ä¾èµé½ä¸å¢å ãè¾åºæ¯ ASTï¼äº¤ç» markdown-view.tsx æ¸²ææ React åç´ ã
+ * 只覆盖本项目模型输出会用到的语法：标题、段落、列表、引用、代码块、分隔线、表格，
+ * 以及行内的加粗/斜体/行内代码/删除线/链接。刻意不做完整 CommonMark，也不接第三方库，
+ * 这样首屏包体积和安装依赖都不增加。输出是 AST，交给 markdown-view.tsx 渲染成 React 元素。
  */
 
 export type InlineNode =
@@ -95,7 +95,7 @@ function isTableRow(line: string) {
   return line.trim().startsWith("|") && line.trim().endsWith("|") && line.includes("|");
 }
 
-/** è§£æ Markdown ææ¬ä¸ºåçº§ ASTãæµå¼æªé­åçä»£ç åä¼è¢«å½ä½ä»£ç åå¤çã */
+/** 解析 Markdown 文本为块级 AST。流式未闭合的代码块会被当作代码块处理。 */
 export function parseMarkdown(source: string): BlockNode[] {
   const lines = source.replace(/\r\n/g, "\n").split("\n");
   const blocks: BlockNode[] = [];

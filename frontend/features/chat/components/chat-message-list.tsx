@@ -30,7 +30,7 @@ export default function ChatMessageList({
           {!messages.length && (
             <div className="py-10 text-center">
               <Sparkles className="brand mx-auto" size={28} />
-              <h2 className="mt-3 font-semibold">æ³ä»è¿ä»½æ°æ®ç¥éä»ä¹ï¼</h2>
+              <h2 className="mt-3 font-semibold">想从这份数据知道什么？</h2>
               <div className="mt-5 flex flex-wrap justify-center gap-2">
                 {quickQuestions.map((q) => (
                   <button key={q} onClick={() => onAsk(q)} disabled={busy}
@@ -56,7 +56,7 @@ export default function ChatMessageList({
       </div>
 
       {!atBottom && (
-        <button onClick={() => scrollToEnd()} title="åå°åºé¨"
+        <button onClick={() => scrollToEnd()} aria-label="回到底部" title="回到底部"
           className="surface border-ui absolute bottom-4 left-1/2 grid size-9 -translate-x-1/2 place-items-center rounded-full border shadow-lg">
           <ArrowDown size={16} />
         </button>

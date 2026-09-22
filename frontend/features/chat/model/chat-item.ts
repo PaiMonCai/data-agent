@@ -14,7 +14,7 @@ export type ChatItem = {
   error?: string;
 };
 
-/** æ¨¡åäº§åºçåæè®¡åï¼å¯¹åº agent.ts ç plan å¯¹è±¡ï¼ */
+/** 模型产出的分析计划（对应 agent.ts 的 plan 对象） */
 export interface AnalysisPlan {
   title?: string;
   kind?: string;
@@ -50,7 +50,7 @@ export interface CleanStepReport {
   summary: string;
 }
 
-/** Agent.analyze çè¿åç»æãagent.ts æªæ æ³¨è¿åç±»åï¼è¿éè¡¥ä¸æ¡å¯è¾¨è¯èåï¼ä¾è°ç¨ä¾§æ¶çªã */
+/** Agent.analyze 的返回结构。agent.ts 未标注返回类型，这里补一条可辨识联合，供调用侧收窄。 */
 export type AnalysisOutcome =
   | { task: "clean"; plan: AnalysisPlan | null; clean: CleanResult | null; report: string }
   | { task: "analyze"; plan: AnalysisPlan | null; result: AnalysisResult | null; report: string };

@@ -26,11 +26,11 @@ export default function ChartView({ result, theme }: { result: AnalysisResult | 
 
   return (
     <div className="relative">
-      <div ref={ref} className="chart-box" />
+      <div ref={ref} className="chart-box" role="img" aria-label="分析图表" />
       {!rendered && (
         <div className="chart-empty surface-2 rounded-xl border border-ui">
           <BarChart3 size={18} className="muted" />
-          <span className="muted">è¯¥ç»æä»¥è¡¨æ ¼åç°ï¼å±å¼ä¸æ¹æç»æ¥ç</span>
+          <span className="muted">该结果以表格呈现，展开下方明细查看</span>
         </div>
       )}
     </div>

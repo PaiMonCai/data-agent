@@ -5,11 +5,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const EDGE_PX = 64;
 
 /**
- * è®©æ»å¨å®¹å¨å¨åå®¹å¢é¿æ¶ä¿æè´´åºï¼ä½ç¨æ·åä¸æ»å¨åç«å³è®©åºæ§å¶æã
+ * 让滚动容器在内容增长时保持贴底，但用户向上滚动后立即让出控制权。
  *
- * åç ResizeObserver çè·éåçå¨ paint ä¹åï¼æµå¼ææ¬æ¯æ¹é½ä¼éªä¸å¸§
- * ï¼åå®¹ååºç°å¨è§å£ä¸æ¹åè¢«æåï¼ãè¿éç¨ MutationObserver å¨åä¸å¸§å
- * è§æµ DOM ååå¹¶éåºï¼é¿åéªçã
+ * 原生 ResizeObserver 的跟随发生在 paint 之后，流式文本每批都会闪一帧
+ * （内容先出现在视口下方再被拉回）。这里用 MutationObserver 在同一帧内
+ * 观测 DOM 变化并钉底，避免闪烁。
  */
 export function useStickToBottom<T extends HTMLElement>() {
   const ref = useRef<T>(null);

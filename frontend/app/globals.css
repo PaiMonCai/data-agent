@@ -50,6 +50,9 @@ button { cursor: pointer; }
 .pretty-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
 .pretty-scrollbar::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 35%, transparent); border-radius: 999px; }
 
+/* 键盘焦点可见性：图标按钮和纯样式按钮都统一一套焦点环 */
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 4px; }
+
 .fade-in { animation: fade-in .18s ease-out; }
 @keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 

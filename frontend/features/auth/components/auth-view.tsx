@@ -15,14 +15,14 @@ export default function AuthView({ onAuthed }: { onAuthed: (user: User) => void 
   const [busy, setBusy] = useState(false);
 
   const sendCode = async () => {
-    if (!email) return setMessage("åå¡«åé®ç®±");
+    if (!email) return setMessage("先填写邮箱");
     setBusy(true); setMessage("");
     try {
       const purpose = mode === "signup" ? "signup" : mode === "reset" ? "reset" : "login";
       const r = await Cloud.auth.sendOtp({ email, purpose });
-      if (r.error || !r.data) throw r.error || new Error("åéå¤±è´¥");
+      if (r.error || !r.data) throw r.error || new Error("发送失败");
       setVerificationId(r.data.verificationId);
-      setMessage("éªè¯ç å·²åéï¼è¯·æ£æ¥é®ç®±");
+      setMessage("验证码已发送，请检查邮箱");
     } catch (e) {
       setMessage(Cloud.errText(e));
     } finally { setBusy(false); }
@@ -34,19 +34,19 @@ export default function AuthView({ onAuthed }: { onAuthed: (user: User) => void 
     try {
       if (mode === "password") {
         const r = await Cloud.auth.signInWithPassword({ email, password });
-        if (r.error || !r.data?.user) throw r.error || new Error("ç»å½å¤±è´¥");
+        if (r.error || !r.data?.user) throw r.error || new Error("登录失败");
         onAuthed(r.data.user);
         return;
       }
 
-      if (!verificationId) throw new Error("è¯·ååééªè¯ç ");
-      if (!code) throw new Error("è¯·è¾å¥éªè¯ç ");
+      if (!verificationId) throw new Error("请先发送验证码");
+      if (!code) throw new Error("请输入验证码");
 
       if (mode === "reset") {
         const r = await Cloud.auth.resetPassword({
           email, verificationId, nonce: code, password,
         });
-        if (r.error || !r.data?.user) throw r.error || new Error("éç½®å¤±è´¥");
+        if (r.error || !r.data?.user) throw r.error || new Error("重置失败");
         onAuthed(r.data.user);
         return;
       }
@@ -56,7 +56,7 @@ export default function AuthView({ onAuthed }: { onAuthed: (user: User) => void 
         verificationId, token: code, email, purpose,
         ...(mode === "signup" ? { password } : {}),
       });
-      if (r.error || !r.data?.user) throw r.error || new Error("éªè¯å¤±è´¥");
+      if (r.error || !r.data?.user) throw r.error || new Error("验证失败");
       onAuthed(r.data.user);
     } catch (e) {
       setMessage(Cloud.errText(e));
@@ -64,9 +64,9 @@ export default function AuthView({ onAuthed }: { onAuthed: (user: User) => void 
   };
 
   const tabs = [
-    ["password", "å¯ç ç»å½"],
-    ["otp", "éªè¯ç "],
-    ["signup", "æ³¨å"],
+    ["password", "密码登录"],
+    ["otp", "验证码"],
+    ["signup", "注册"],
   ] as const;
 
   return (
@@ -76,7 +76,7 @@ export default function AuthView({ onAuthed }: { onAuthed: (user: User) => void 
           <div className="brand-bg grid size-11 place-items-center rounded-2xl text-white"><BarChart3 size={22} /></div>
           <div>
             <h1 className="text-xl font-semibold">Data Agent</h1>
-            <p className="muted mt-1 text-sm">ä¸ä¼ æ°æ®ï¼ç¨èªç¶è¯­è¨å®æåæä¸æ¸æ´</p>
+            <p className="muted mt-1 text-sm">上传数据，用自然语言完成分析与清洗</p>
           </div>
         </div>
 
@@ -90,12 +90,12 @@ export default function AuthView({ onAuthed }: { onAuthed: (user: User) => void 
         </div>
 
         {mode === "reset" && (
-          <button className="muted mb-4 text-sm hover:underline" onClick={() => setMode("password")}>â è¿åç»å½</button>
+          <button className="muted mb-4 text-sm hover:underline" onClick={() => setMode("password")}>← 返回登录</button>
         )}
 
         <form onSubmit={submit} className="space-y-4">
           <label className="block">
-            <span className="mb-1.5 block text-sm font-medium">é®ç®±</span>
+            <span className="mb-1.5 block text-sm font-medium">邮箱</span>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required
               className="surface-2 border-ui w-full rounded-xl border px-3.5 py-3 outline-none focus:border-[var(--brand)]"
               placeholder="you@example.com" />
@@ -103,23 +103,23 @@ export default function AuthView({ onAuthed }: { onAuthed: (user: User) => void 
 
           {(mode === "password" || mode === "signup" || mode === "reset") && (
             <label className="block">
-              <span className="mb-1.5 block text-sm font-medium">{mode === "reset" ? "æ°å¯ç " : "å¯ç "}</span>
+              <span className="mb-1.5 block text-sm font-medium">{mode === "reset" ? "新密码" : "密码"}</span>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required
                 className="surface-2 border-ui w-full rounded-xl border px-3.5 py-3 outline-none focus:border-[var(--brand)]"
-                placeholder="è³å° 8 ä½" />
+                placeholder="至少 8 位" />
             </label>
           )}
 
           {mode !== "password" && (
             <div>
-              <span className="mb-1.5 block text-sm font-medium">é®ç®±éªè¯ç </span>
+              <span className="mb-1.5 block text-sm font-medium">邮箱验证码</span>
               <div className="flex gap-2">
                 <input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric"
                   className="surface-2 border-ui min-w-0 flex-1 rounded-xl border px-3.5 py-3 outline-none focus:border-[var(--brand)]"
-                  placeholder="6 ä½éªè¯ç " />
+                  placeholder="6 位验证码" />
                 <button type="button" disabled={busy} onClick={sendCode}
                   className="surface border-ui rounded-xl border px-4 text-sm font-medium hover:brand-soft">
-                  åé
+                  发送
                 </button>
               </div>
             </div>
@@ -128,12 +128,12 @@ export default function AuthView({ onAuthed }: { onAuthed: (user: User) => void 
           {message && <p className="text-sm text-[var(--danger)]">{message}</p>}
 
           <button disabled={busy} className="brand-bg w-full rounded-xl px-4 py-3 font-medium text-white disabled:opacity-50">
-            {busy ? "å¤çä¸­â¦" : mode === "password" ? "ç»å½" : mode === "reset" ? "éç½®å¹¶ç»å½" : mode === "signup" ? "åå»ºè´¦å·" : "éªè¯å¹¶ç»å½"}
+            {busy ? "处理中…" : mode === "password" ? "登录" : mode === "reset" ? "重置并登录" : mode === "signup" ? "创建账号" : "验证并登录"}
           </button>
 
           {mode === "password" && (
             <button type="button" onClick={() => setMode("reset")} className="muted w-full text-sm hover:underline">
-              å¿è®°å¯ç ï¼
+              忘记密码？
             </button>
           )}
         </form>
