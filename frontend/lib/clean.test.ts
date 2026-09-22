@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Parse } from "./parse.ts";
+import { Parse, isoDate } from "./parse.ts";
 import { Clean } from "./clean.ts";
 import type { CleanStep } from "./types.ts";
 
@@ -18,6 +18,19 @@ const dataset = Parse.fromText(CSV);
 const run = (ops: CleanStep[]) => Clean.run(dataset.rows.map((r) => Object.assign({}, r)), dataset.columns, ops);
 /* 原始单元格都是字符串，clip/fill_null 等写回的可能是数字，统一转成数字再断言 */
 const colOf = (rows: Record<string, unknown>[], name: string): number[] => rows.map((r) => Number(r[name]));
+
+test("Parse.isoDate 按本地时区输出，跨月跨年都不跳天", () => {
+  const mk = (y: number, m: number, d: number) => new Date(y, m - 1, d);
+  assert.equal(isoDate(mk(2024, 1, 1)), "2024-01-01");
+  assert.equal(isoDate(mk(2024, 1, 31)), "2024-01-31");
+  assert.equal(isoDate(mk(2024, 12, 31)), "2024-12-31");
+  assert.equal(isoDate(mk(2025, 1, 1)), "2025-01-01");
+  assert.equal(isoDate(mk(2024, 2, 29)), "2024-02-29");
+  assert.equal(isoDate(mk(1999, 6, 15)), "1999-06-15");
+  // 每月 1 日和最后一天都恰好落在本地当天的两端
+  assert.equal(isoDate(new Date(2024, 0, 1, 0, 0, 0)), "2024-01-01");
+  assert.equal(isoDate(new Date(2024, 0, 1, 23, 59, 59)), "2024-01-01");
+});
 
 test("isBlank 认识空值占位符", () => {
   assert.equal(Clean.isBlank(null), true);
@@ -164,6 +177,10 @@ test("convert 转数值/日期/文本", () => {
   assert.equal(run([{ op: "convert", column: "amount", type: "number" }]).rows[0].amount, 100);
   assert.equal(run([{ op: "convert", column: "city", type: "text" }]).rows[0].city, "BJ");
   assert.equal(run([{ op: "convert", column: "nope", type: "number" }]).report[0].summary, "字段不存在，跳过");
+  // 日期按本地时区格式化，不能用 toISOString（东八区会把 1 月 1 日退成上一年的 12 月 31 日）
+  assert.equal(run([{ op: "convert", column: "date", type: "date" }]).rows[0].date, "2024-01-01");
+  assert.equal(run([{ op: "convert", column: "date", type: "date" }]).rows[4].date, "2024-01-05");
+  assert.equal(run([{ op: "convert", column: "date", type: "date" }]).rows[3].date, "2024-01-04");
 });
 
 test("rename / drop_columns", () => {

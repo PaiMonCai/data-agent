@@ -13,6 +13,16 @@ export interface ParseWorkbook {
 }
 
 /* 数据解析：分隔文本 / JSON -> { headers, rows, columns } */
+
+/**
+ * 按本地时区把 Date 格式化成 YYYY-MM-DD。
+ * 不能用 toISOString：它按 UTC 输出，东八区会把 1 月 1 日变成上一年的 12 月 31 日。
+ */
+function isoDate(d: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 const Parse = (function () {
 
   function detectDelimiter(text: string): string {
@@ -250,7 +260,7 @@ const Parse = (function () {
         const visitors = Math.round(orders * (7 + rnd() * 5));
         const margin = Math.round((0.22 + rnd() * 0.2) * 1000) / 1000;
         rows.push({
-          日期: date.toISOString().slice(0, 10),
+          日期: isoDate(date),
           渠道: ch,
           地区: region,
           订单数: orders,
@@ -279,5 +289,5 @@ const Parse = (function () {
 })();
 
 
-export { Parse };
+export { Parse, isoDate };
 export default Parse;
