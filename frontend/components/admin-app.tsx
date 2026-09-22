@@ -357,9 +357,11 @@ function ProviderCard({ provider, apiKey, busy, onPatch, onApiKey, onRemove, onD
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Input label="供应商 ID" value={provider.id}
-          onChange={(id) => onPatch({ id: id.replace(/[^A-Za-z0-9_-]/g, "") })}
-          placeholder="openai"/>
+        <label className="block">
+          <span className="mb-2 block text-sm font-medium">供应商 ID</span>
+          <input value={provider.id} readOnly
+            className="surface border-ui muted w-full cursor-not-allowed rounded-xl border px-3 py-2.5 outline-none"/>
+        </label>
         <Input label="显示名称" value={provider.name} onChange={(name) => onPatch({ name })} placeholder="OpenAI"/>
         <div className="md:col-span-2">
           <Input label="Base URL" value={provider.baseUrl} onChange={(baseUrl) => onPatch({ baseUrl })}
