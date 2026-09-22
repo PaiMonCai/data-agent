@@ -3,19 +3,19 @@
 # Data Agent installation-time PostgreSQL orchestration.
 # Sourced by install.sh. It uses prompt/log/validation helpers from the parent script.
 
-DB_HOST_KIND="\${DB_HOST_KIND:-}"
-DB_LINK_NETWORK="\${DB_LINK_NETWORK:-\${DATA_AGENT_DB_LINK_NETWORK:-data-agent-db-link}}"
-DB_PROXY_REQUIRED="\${DB_PROXY_REQUIRED:-0}"
-DB_PROXY_BIND="\${DB_PROXY_BIND:-}"
-DB_PROXY_PORT="\${DB_PROXY_PORT:-\${DATA_AGENT_DB_PROXY_PORT:-15432}}"
-DB_SOURCE_PORT="\${DB_SOURCE_PORT:-}"
-DB_CONTAINER="\${DB_CONTAINER:-\${DATA_AGENT_DB_CONTAINER:-}}"
-DB_ADMIN_USER="\${DB_ADMIN_USER:-\${DATA_AGENT_DB_ADMIN_USER:-}}"
-DB_ADMIN_PASSWORD="\${DB_ADMIN_PASSWORD:-\${DATA_AGENT_DB_ADMIN_PASSWORD:-}}"
-DB_DATABASE="\${DB_DATABASE:-\${DATA_AGENT_DB_DATABASE:-data_agent}}"
-DB_USERNAME="\${DB_USERNAME:-\${DATA_AGENT_DB_USERNAME:-data_agent}}"
-DB_PASSWORD="\${DB_PASSWORD:-\${DATA_AGENT_DB_PASSWORD:-}}"
-DATABASE_URL="\${DATABASE_URL:-\${DATA_AGENT_DATABASE_URL:-}}"
+DB_HOST_KIND="${DB_HOST_KIND:-}"
+DB_LINK_NETWORK="${DB_LINK_NETWORK:-${DATA_AGENT_DB_LINK_NETWORK:-data-agent-db-link}}"
+DB_PROXY_REQUIRED="${DB_PROXY_REQUIRED:-0}"
+DB_PROXY_BIND="${DB_PROXY_BIND:-}"
+DB_PROXY_PORT="${DB_PROXY_PORT:-${DATA_AGENT_DB_PROXY_PORT:-15432}}"
+DB_SOURCE_PORT="${DB_SOURCE_PORT:-}"
+DB_CONTAINER="${DB_CONTAINER:-${DATA_AGENT_DB_CONTAINER:-}}"
+DB_ADMIN_USER="${DB_ADMIN_USER:-${DATA_AGENT_DB_ADMIN_USER:-}}"
+DB_ADMIN_PASSWORD="${DB_ADMIN_PASSWORD:-${DATA_AGENT_DB_ADMIN_PASSWORD:-}}"
+DB_DATABASE="${DB_DATABASE:-${DATA_AGENT_DB_DATABASE:-data_agent}}"
+DB_USERNAME="${DB_USERNAME:-${DATA_AGENT_DB_USERNAME:-data_agent}}"
+DB_PASSWORD="${DB_PASSWORD:-${DATA_AGENT_DB_PASSWORD:-}}"
+DATABASE_URL="${DATABASE_URL:-${DATA_AGENT_DATABASE_URL:-}}"
 
 validate_db_ident() {
   [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] ||
@@ -30,7 +30,7 @@ list_postgres_containers() {
 install_db_container_env() {
   local container="$1" key="$2"
   docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$container" 2>/dev/null |
-    sed -n "s/^\${key}=//p" | head -n1
+    sed -n "s/^${key}=//p" | head -n1
 }
 
 ensure_db_link_network() {
@@ -128,38 +128,38 @@ setup_host_postgres_container() {
     docker inspect "$DB_CONTAINER" >/dev/null 2>&1 || die "PostgreSQL container not found: $DB_CONTAINER"
     container_id="$(docker inspect -f '{{.Id}}' "$DB_CONTAINER")"
     container_name="$(docker inspect -f '{{.Name}}' "$DB_CONTAINER")"
-    container_name="\${container_name#/}"
+    container_name="${container_name#/}"
   else
-    (("\${#candidates[@]}" > 0)) || return 1
+    (("${#candidates[@]}" > 0)) || return 1
     if [[ "$ASSUME_YES" -eq 0 ]]; then
       cat > /dev/tty <<'EOF'
 
 Detected PostgreSQL Docker containers:
 EOF
       local i=1
-      for line in "\${candidates[@]}"; do
+      for line in "${candidates[@]}"; do
         printf '  %d) %s\n' "$i" "$line" > /dev/tty
         ((i++))
       done
-      if (("\${#candidates[@]}" > 1)); then
-        pick="$(choose "Database container" "1" "\${#candidates[@]}")"
+      if (("${#candidates[@]}" > 1)); then
+        pick="$(choose "Database container" "1" "${#candidates[@]}")"
       fi
-    elif (("\${#candidates[@]}" > 1)); then
+    elif (("${#candidates[@]}" > 1)); then
       die "multiple PostgreSQL containers detected; set DATA_AGENT_DB_CONTAINER or --db-container"
     fi
-    IFS=$'\t' read -r container_id container_name _ <<< "\${candidates[$((pick-1))]}"
+    IFS=$'\t' read -r container_id container_name _ <<< "${candidates[$((pick-1))]}"
   fi
 
-  DB_DATABASE="$(prompt "Database name" "\${DB_DATABASE:-data_agent}")"
-  DB_USERNAME="$(prompt "Database username" "\${DB_USERNAME:-data_agent}")"
+  DB_DATABASE="$(prompt "Database name" "${DB_DATABASE:-data_agent}")"
+  DB_USERNAME="$(prompt "Database username" "${DB_USERNAME:-data_agent}")"
   validate_db_ident "$DB_DATABASE"
   validate_db_ident "$DB_USERNAME"
-  DB_PASSWORD="\${DB_PASSWORD:-$(random_hex 24)}"
+  DB_PASSWORD="${DB_PASSWORD:-$(random_hex 24)}"
 
-  admin_user="\${DB_ADMIN_USER:-$(install_db_container_env "$container_id" POSTGRES_USER)}"
+  admin_user="${DB_ADMIN_USER:-$(install_db_container_env "$container_id" POSTGRES_USER)}"
   admin_db="$(install_db_container_env "$container_id" POSTGRES_DB)"
-  admin_user="\${admin_user:-postgres}"
-  admin_db="\${admin_db:-postgres}"
+  admin_user="${admin_user:-postgres}"
+  admin_db="${admin_db:-postgres}"
   admin_password="$DB_ADMIN_PASSWORD"
   if [[ -z "$admin_password" ]]; then
     admin_password="$(install_db_container_env "$container_id" POSTGRES_PASSWORD)"
@@ -192,14 +192,14 @@ EOF
 
   DB_HOST_KIND="docker-container"
   DB_CONTAINER="$container_name"
-  DATABASE_URL="postgresql://\${DB_USERNAME}:\${DB_PASSWORD}@\${container_name}:\${port}/\${DB_DATABASE}"
+  DATABASE_URL="postgresql://${DB_USERNAME}:${DB_PASSWORD}@${container_name}:${port}/${DB_DATABASE}"
   log "host PostgreSQL container connected through Docker network $DB_LINK_NETWORK"
 }
 
 system_postgres_local_runner() {
   if [[ $(id -un) == "postgres" ]]; then
     psql "$@"
-  elif [[ \${EUID:-$(id -u)} -eq 0 ]] && command -v runuser >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
+  elif [[ ${EUID:-$(id -u)} -eq 0 ]] && command -v runuser >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
     runuser -u postgres -- psql "$@"
   elif command -v sudo >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
     sudo -u postgres psql "$@"
@@ -214,7 +214,7 @@ setup_host_system_postgres() {
   local admin_mode="local" admin_user="postgres" admin_password="" source_port database_url gateway probe_name
   if ! system_postgres_local_runner -X -d postgres -Atqc 'SELECT 1' >/dev/null 2>&1; then
     admin_mode="password"
-    admin_user="\${DB_ADMIN_USER:-postgres}"
+    admin_user="${DB_ADMIN_USER:-postgres}"
     admin_password="$DB_ADMIN_PASSWORD"
     if [[ "$ASSUME_YES" -eq 0 ]]; then
       admin_user="$(prompt "System PostgreSQL admin user" "$admin_user")"
@@ -226,11 +226,11 @@ setup_host_system_postgres() {
       return 1
   fi
 
-  DB_DATABASE="$(prompt "Database name" "\${DB_DATABASE:-data_agent}")"
-  DB_USERNAME="$(prompt "Database username" "\${DB_USERNAME:-data_agent}")"
+  DB_DATABASE="$(prompt "Database name" "${DB_DATABASE:-data_agent}")"
+  DB_USERNAME="$(prompt "Database username" "${DB_USERNAME:-data_agent}")"
   validate_db_ident "$DB_DATABASE"
   validate_db_ident "$DB_USERNAME"
-  DB_PASSWORD="\${DB_PASSWORD:-$(random_hex 24)}"
+  DB_PASSWORD="${DB_PASSWORD:-$(random_hex 24)}"
 
   if [[ "$admin_mode" == "local" ]]; then
     provision_postgres_runner "system_postgres_local_runner -X -d postgres" "$DB_USERNAME" "$DB_DATABASE" "$DB_PASSWORD"
@@ -244,7 +244,7 @@ setup_host_system_postgres() {
   valid_port "$source_port" || source_port=5432
   DB_SOURCE_PORT="$source_port"
 
-  database_url="postgresql://\${DB_USERNAME}:\${DB_PASSWORD}@host.docker.internal:\${source_port}/\${DB_DATABASE}"
+  database_url="postgresql://${DB_USERNAME}:${DB_PASSWORD}@host.docker.internal:${source_port}/${DB_DATABASE}"
   log "testing Docker -> host PostgreSQL connectivity..."
   if probe_postgres_from_docker "$database_url" --add-host host.docker.internal:host-gateway >/dev/null 2>&1; then
     DB_HOST_KIND="system-direct"
@@ -255,18 +255,18 @@ setup_host_system_postgres() {
   fi
 
   gateway="$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)"
-  gateway="\${gateway:-172.17.0.1}"
+  gateway="${gateway:-172.17.0.1}"
   DB_PROXY_BIND="$gateway"
   DB_PROXY_PORT="$(pick_proxy_port)"
   probe_name="data-agent-db-proxy-probe-$$"
 
   warn "system PostgreSQL is not reachable directly from Docker; enabling a Docker-gateway-only proxy"
   docker run -d --rm --name "$probe_name" --network host alpine/socat:latest \
-    "TCP-LISTEN:\${DB_PROXY_PORT},bind=\${DB_PROXY_BIND},fork,reuseaddr" \
-    "TCP:127.0.0.1:\${source_port}" >/dev/null
+    "TCP-LISTEN:${DB_PROXY_PORT},bind=${DB_PROXY_BIND},fork,reuseaddr" \
+    "TCP:127.0.0.1:${source_port}" >/dev/null
   sleep 1
 
-  database_url="postgresql://\${DB_USERNAME}:\${DB_PASSWORD}@host.docker.internal:\${DB_PROXY_PORT}/\${DB_DATABASE}"
+  database_url="postgresql://${DB_USERNAME}:${DB_PASSWORD}@host.docker.internal:${DB_PROXY_PORT}/${DB_DATABASE}"
   if ! probe_postgres_from_docker "$database_url" --add-host host.docker.internal:host-gateway >/dev/null 2>&1; then
     docker rm -f "$probe_name" >/dev/null 2>&1 || true
     die "system PostgreSQL could not be reached through the safe Docker gateway proxy; check pg_hba.conf for local TCP password access"
@@ -312,9 +312,9 @@ EOF
     local)
       validate_db_ident "$DB_DATABASE"
       validate_db_ident "$DB_USERNAME"
-      DB_PASSWORD="\${DB_PASSWORD:-$(random_hex 24)}"
+      DB_PASSWORD="${DB_PASSWORD:-$(random_hex 24)}"
       DB_HOST_KIND="managed"
-      DATABASE_URL="postgresql://\${DB_USERNAME}:\${DB_PASSWORD}@postgres:5432/\${DB_DATABASE}"
+      DATABASE_URL="postgresql://${DB_USERNAME}:${DB_PASSWORD}@postgres:5432/${DB_DATABASE}"
       ;;
     host)
       setup_host_database
@@ -348,13 +348,13 @@ prepare_database_compose_blocks() {
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: \${DATA_AGENT_DB_DATABASE:-data_agent}
-      POSTGRES_USER: \${DATA_AGENT_DB_USERNAME:-data_agent}
-      POSTGRES_PASSWORD: \${DATA_AGENT_DB_PASSWORD:?missing DATA_AGENT_DB_PASSWORD}
+      POSTGRES_DB: ${DATA_AGENT_DB_DATABASE:-data_agent}
+      POSTGRES_USER: ${DATA_AGENT_DB_USERNAME:-data_agent}
+      POSTGRES_PASSWORD: ${DATA_AGENT_DB_PASSWORD:?missing DATA_AGENT_DB_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \${DATA_AGENT_DB_USERNAME:-data_agent} -d \${DATA_AGENT_DB_DATABASE:-data_agent}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DATA_AGENT_DB_USERNAME:-data_agent} -d ${DATA_AGENT_DB_DATABASE:-data_agent}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -393,8 +393,8 @@ YAML
     restart: unless-stopped
     network_mode: host
     command:
-      - "TCP-LISTEN:\${DATA_AGENT_DB_PROXY_PORT:?missing DATA_AGENT_DB_PROXY_PORT},bind=\${DATA_AGENT_DB_PROXY_BIND:?missing DATA_AGENT_DB_PROXY_BIND},fork,reuseaddr"
-      - "TCP:127.0.0.1:\${DATA_AGENT_DB_SOURCE_PORT:?missing DATA_AGENT_DB_SOURCE_PORT}"
+      - "TCP-LISTEN:${DATA_AGENT_DB_PROXY_PORT:?missing DATA_AGENT_DB_PROXY_PORT},bind=${DATA_AGENT_DB_PROXY_BIND:?missing DATA_AGENT_DB_PROXY_BIND},fork,reuseaddr"
+      - "TCP:127.0.0.1:${DATA_AGENT_DB_SOURCE_PORT:?missing DATA_AGENT_DB_SOURCE_PORT}"
 YAML
 )"
     APP_DB_DEPENDS_BLOCK="$(cat <<'YAML'
@@ -432,6 +432,6 @@ verify_database_connectivity() {
   fi
 
   log "checking $DB_MODE PostgreSQL connectivity from Docker..."
-  probe_postgres_from_docker "$DATABASE_URL" "\${args[@]}" >/dev/null ||
+  probe_postgres_from_docker "$DATABASE_URL" "${args[@]}" >/dev/null ||
     die "cannot connect to $DB_MODE PostgreSQL from Docker. Check database address, credentials, Docker networking and PostgreSQL access rules."
 }
