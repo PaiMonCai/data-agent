@@ -43,10 +43,10 @@ export interface AnalysisHistory {
   id: string;
   question: string;
   kind: string;
-  result: any;
+  result: AnalysisResult;
   summary?: string | null;
   created_at: string;
-  plan?: any;
+  plan?: AnalysisPlan | null;
 }
 
 export interface AppSettings {
@@ -66,3 +66,119 @@ export interface ParsedTable {
   columns: ColumnMeta[];
   meta?: Record<string, unknown>;
 }
+
+/* ---------- 分析计划与结果 ---------- */
+
+/** 图表类型，与 agent 计划里的 chart 字段一一对应 */
+export type ChartKind = "line" | "bar" | "pie" | "scatter" | "table";
+
+export type AnalysisAgg = "sum" | "avg" | "count" | "max" | "min";
+
+export type AnalysisFilterOp = "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains" | "in";
+
+export type Granularity = "day" | "week" | "month" | "quarter" | "year";
+
+export type AnalysisFilter = {
+  field: string;
+  op: AnalysisFilterOp;
+  value: unknown;
+};
+
+/** 模型规划出的分析计划。所有字段都可选：模型可能漏填，sanitize 之后才保证有值 */
+export interface AnalysisPlan {
+  title?: string;
+  kind?: string;
+  chart?: ChartKind;
+  metric?: string | null;
+  agg?: AnalysisAgg;
+  dimension?: string | null;
+  timeField?: string | null;
+  granularity?: Granularity;
+  filters?: AnalysisFilter[];
+  compareField?: string | null;
+  compareValues?: string[];
+  periods?: number;
+  limit?: number;
+  sort?: "asc" | "desc";
+}
+
+/** 一条图表序列 */
+export interface AnalysisSeries {
+  name: string;
+  data: number[];
+}
+
+/** 结果表。表头是字符串，单元格可能是数字也可能是字符串 */
+export interface AnalysisTable {
+  headers: string[];
+  rows: unknown[][];
+}
+
+/** 散点图：两个数值字段的点集，每个点是 [x, y] */
+export interface AnalysisScatter {
+  x: string;
+  y: string;
+  points: [number, number][];
+}
+
+/** 异常检测算出的均值基线，用来在折线图上画 markLine */
+export interface AnalysisBaseline {
+  mean: number;
+  std: number;
+  upper: number;
+  lower: number;
+}
+
+export interface AnalysisAnomalyPoint {
+  label: string;
+  dataIndex: number;
+  value: number;
+  type: string;
+}
+
+/**
+ * 分析引擎的真实产出。
+ *
+ * 上面列的是渲染层真正会读的字段。各分支还会附带只有自己用的字段
+ * （概览的 distribution、异常分支的 anomalies、相关性分支的 pairs），
+ * 所以保留一个宽松的索引签名，具体内容由对应的引擎分支保证。
+ */
+export interface AnalysisResult {
+  kind?: string;
+  title?: string;
+  chart?: ChartKind;
+  labels?: string[];
+  series?: AnalysisSeries[];
+  table?: AnalysisTable | null;
+  scatter?: AnalysisScatter | null;
+  baseline?: AnalysisBaseline | null;
+  anomalyPoints?: AnalysisAnomalyPoint[];
+  filters?: AnalysisFilter[];
+  rowCount?: number;
+  stats?: Record<string, unknown>;
+  notes?: string[];
+  [key: string]: unknown;
+}
+
+/* ---------- 数据清洗 ---------- */
+
+/** 清洗引擎单步操作的执行结果 */
+export interface CleanStepReport {
+  op: string;
+  label: string;
+  affected: number;
+  summary: string;
+}
+
+export interface CleanResult {
+  before: { rows: number; cols: number };
+  after: { rows: number; cols: number };
+  columns: ColumnMeta[];
+  rows: DataRow[];
+  report: CleanStepReport[];
+}
+
+/** Agent.analyze 的返回结构。agent.ts 未标注返回类型，这里补一条可辨识联合，供调用侧收窄。 */
+export type AnalysisOutcome =
+  | { task: "clean"; plan: AnalysisPlan | null; clean: CleanResult | null; report: string }
+  | { task: "analyze"; plan: AnalysisPlan | null; result: AnalysisResult | null; report: string };
