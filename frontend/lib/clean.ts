@@ -1,5 +1,6 @@
-// @ts-nocheck
-import { Parse } from "./parse";
+import { Parse } from "./parse.ts";
+import { Engine } from "./engine.ts";
+import type { CleanResult, CleanStep, CleanStepReport, ColumnMeta, DataRow } from "./types";
 
 /* 数据清洗引擎：用自然语言描述 -> 操作序列 -> 在这里真实执行，输出逐步清洗报告
    设计原则同分析引擎：不改数据语义，不执行任何来自模型的字符串代码（表达式走自研解析器） */
@@ -8,36 +9,38 @@ const Clean = (function () {
   const D = Parse.toDate;
 
   const BLANK_RE = /^(null|none|nil|na|n\/a|nan|-|--|—|unknown)$/i;
-  function isBlank(v) {
+  function isBlank(v: unknown): boolean {
     if (v === null || v === undefined) return true;
     const s = String(v).trim();
     return s === '' || BLANK_RE.test(s);
   }
 
-  function headersOf(columns) { return columns.map((c) => c.name); }
+  function headersOf(columns: ColumnMeta[]): string[] { return columns.map((c) => c.name); }
 
-  function rebuild(rows, columns) {
+  function rebuild(rows: DataRow[], columns: ColumnMeta[]): ColumnMeta[] {
     const names = headersOf(columns);
     return Parse.inferColumns(names, rows);
   }
 
-  function median(a) {
+  function median(a: number[]): number {
     if (!a.length) return 0;
     const s = [...a].sort((x, y) => x - y);
     const m = Math.floor(s.length / 2);
     return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
   }
-  function mode(a) {
-    const cnt = new Map();
+  function mode(a: string[]): string {
+    const cnt = new Map<string, number>();
     a.forEach((v) => cnt.set(v, (cnt.get(v) || 0) + 1));
-    let best = a[0], bestN = 0;
+    let best: string = a[0];
+    let bestN = 0;
     cnt.forEach((n, v) => { if (n > bestN) { bestN = n; best = v; } });
     return best;
   }
 
   /* ================= 安全表达式求值 =================
      只认数字、字符串、字段名、白名单函数和有限运算符，绝不 eval / new Function */
-  const FUNCS = {
+  /* 白名单函数的参数个数和类型各不相同，这里用 any[] 收口；入参只可能来自 tokenize 切出来的 token */
+  const FUNCS: Record<string, (...args: any[]) => unknown> = {
     ROUND: (a, b = 0) => { const p = Math.pow(10, b); return Math.round(a * p) / p; },
     ABS: (a) => Math.abs(a),
     CEIL: (a) => Math.ceil(a),
@@ -60,12 +63,24 @@ const Clean = (function () {
     CONCAT: (...a) => a.join(''),
   };
 
-  function tokenize(src) {
+  /** 策略名 -> 中文说明。策略来自模型，匹配不上就原样显示 */
+  function labelOf(map: Record<string, string>, key: string): string {
+    return map[key] || key;
+  }
+
+  /** 表达式词法单元。num/str 的 v 已经是原始类型，id/op 存字面文本 */
+  type CleanToken =
+    | { t: 'num'; v: number }
+    | { t: 'str'; v: string }
+    | { t: 'id'; v: string }
+    | { t: 'op'; v: string };
+
+  function tokenize(src: string): CleanToken[] {
     const s = String(src);
-    const out = [];
+    const out: CleanToken[] = [];
     let i = 0;
-    const isIdentStart = (c) => /[A-Za-z_\u4e00-\u9fa5]/.test(c);
-    const isIdent = (c) => /[A-Za-z0-9_\u4e00-\u9fa5.]/.test(c);
+    const isIdentStart = (c: string): boolean => /[A-Za-z_\u4e00-\u9fa5]/.test(c);
+    const isIdent = (c: string): boolean => /[A-Za-z0-9_\u4e00-\u9fa5.]/.test(c);
     while (i < s.length) {
       const c = s[i];
       if (/\s/.test(c)) { i++; continue; }
@@ -98,13 +113,13 @@ const Clean = (function () {
     return out;
   }
 
-  function evalExpr(src, row, names) {
+  function evalExpr(src: string, row: DataRow, names: string[]): unknown {
     const tk = tokenize(src);
     let p = 0;
-    const peek = () => tk[p];
-    const eat = (v) => { if (tk[p] && tk[p].v === v) { p++; return true; } return false; };
+    const peek = (): CleanToken | undefined => tk[p];
+    const eat = (v: string): boolean => { if (tk[p] && tk[p].v === v) { p++; return true; } return false; };
 
-    function lookup(name) {
+    function lookup(name: string): unknown {
       if (Object.prototype.hasOwnProperty.call(row, name)) return row[name];
       const hit = names.find((n) => n === name)
         || names.find((n) => String(n).toLowerCase() === String(name).toLowerCase())
@@ -113,19 +128,23 @@ const Clean = (function () {
       return row[hit];
     }
 
-    function logic() {
-      let left = comparison();
-      while (peek() && peek().t === 'id' && ['AND', 'OR', 'and', 'or', '&&', '||'].includes(peek().v)) {
-        const op = tk[p++].v.toUpperCase();
+    function logic(): unknown {
+      let left: unknown = comparison();
+      let t = peek();
+      while (t && t.t === 'id' && ['AND', 'OR', 'and', 'or', '&&', '||'].includes(t.v)) {
+        const op = t.v.toUpperCase();
+        p++;
         const right = comparison();
         left = (op === 'OR' || op === '||') ? (left || right) : (left && right);
+        t = peek();
       }
       return left;
     }
 
-    function comparison() {
-      let left = additive();
-      if (peek() && peek().t === 'op' && ['=', '==', '!=', '>', '<', '>=', '<='].includes(peek().v)) {
+    function comparison(): unknown {
+      let left: unknown = additive();
+      const t = peek();
+      if (t && t.t === 'op' && ['=', '==', '!=', '>', '<', '>=', '<='].includes(t.v)) {
         const op = tk[p++].v;
         const right = additive();
         const ln = N(left), rn = N(right);
@@ -141,9 +160,10 @@ const Clean = (function () {
       return left;
     }
 
-    function additive() {
-      let v = multiplicative();
-      while (peek() && peek().t === 'op' && (peek().v === '+' || peek().v === '-')) {
+    function additive(): unknown {
+      let v: unknown = multiplicative();
+      let t = peek();
+      while (t && t.t === 'op' && (t.v === '+' || t.v === '-')) {
         const op = tk[p++].v;
         const r = multiplicative();
         const ln = N(v), rn = N(r);
@@ -152,24 +172,28 @@ const Clean = (function () {
         }
         v = op === '+' ? ((ln !== null && rn !== null && String(v).trim() !== '' && String(r).trim() !== '') ? ln + rn : String(v) + String(r))
           : (ln !== null && rn !== null ? ln - rn : NaN);
+        t = peek();
       }
       return v;
     }
 
-    function multiplicative() {
-      let v = unary();
-      while (peek() && peek().t === 'op' && ['*', '/', '%', '^'].includes(peek().v)) {
+    function multiplicative(): unknown {
+      let v: unknown = unary();
+      let t = peek();
+      while (t && t.t === 'op' && ['*', '/', '%', '^'].includes(t.v)) {
         const op = tk[p++].v;
         const r = unary();
         const a = N(v), b = N(r);
         if (a === null || b === null) throw new Error('参与运算的字段不是数值：' + v + ' ' + op + ' ' + r);
         v = op === '*' ? a * b : op === '/' ? (b === 0 ? 0 : a / b) : op === '%' ? (b === 0 ? 0 : a % b) : Math.pow(a, b);
+        t = peek();
       }
       return v;
     }
 
-    function unary() {
-      if (peek() && peek().t === 'op' && (peek().v === '-' || peek().v === '+')) {
+    function unary(): unknown {
+      const t = peek();
+      if (t && t.t === 'op' && (t.v === '-' || t.v === '+')) {
         const op = tk[p++].v;
         const v = unary();
         const n = N(v);
@@ -178,7 +202,7 @@ const Clean = (function () {
       return primary();
     }
 
-    function primary() {
+    function primary(): unknown {
       const t = peek();
       if (!t) throw new Error('表达式不完整');
       if (t.t === 'num') { p++; return t.v; }
@@ -192,16 +216,18 @@ const Clean = (function () {
       if (t.t === 'id') {
         p++;
         const name = t.v;
-        if (peek() && peek().t === 'op' && peek().v === '(') {
+        const open = peek();
+        if (open && open.t === 'op' && open.v === '(') {
           p++;
-          const args = [];
-          if (!(peek() && peek().t === 'op' && peek().v === ')')) {
+          const args: unknown[] = [];
+          const close = peek();
+          if (!(close && close.t === 'op' && close.v === ')')) {
             args.push(logic());
             while (eat(',')) args.push(logic());
           }
           if (!eat(')')) throw new Error('函数括号不匹配：' + name);
           const fn = FUNCS[name.toUpperCase()];
-          if (!fn) throw new Error('不支持的函数：' + name);
+          if (typeof fn !== 'function') throw new Error('不支持的函数：' + name);
           return fn.apply(null, args);
         }
         return lookup(name);
@@ -215,11 +241,21 @@ const Clean = (function () {
   }
 
   /* ================= 清洗操作 ================= */
-  const OPS = {
+  /** 一步清洗操作的产出。rows/columns 可能是新数组，也可能是就地改过的同一批 */
+  interface CleanStepOutcome {
+    rows: DataRow[];
+    columns: ColumnMeta[];
+    affected: number;
+    summary: string;
+  }
+
+  type CleanOpFn = (rows: DataRow[], columns: ColumnMeta[], op: CleanStep) => CleanStepOutcome;
+
+  const OPS: Record<string, CleanOpFn> = {
     drop_duplicates(rows, columns, op) {
       const keys = (op.columns || []).filter((c) => headersOf(columns).includes(c));
-      const seen = new Set();
-      const out = [];
+      const seen = new Set<string>();
+      const out: DataRow[] = [];
       rows.forEach((r) => {
         const k = keys.length ? keys.map((c) => String(r[c])).join('\u0001') : JSON.stringify(r);
         if (seen.has(k)) return;
@@ -242,9 +278,10 @@ const Clean = (function () {
       else if (strategy === 'median') filler = median(vals);
       else if (strategy === 'mode') filler = nonEmpty.length ? mode(nonEmpty.map(String)) : '';
       else if (strategy === 'zero') filler = 0;
-      const label = { mean: '均值', median: '中位数', mode: '众数', ffill: '上一行的值', bfill: '下一行的值', value: '指定值', zero: '零' }[strategy] || strategy;
+      const label = labelOf({ mean: '均值', median: '中位数', mode: '众数', ffill: '上一行的值', bfill: '下一行的值', value: '指定值', zero: '零' }, strategy);
 
-      let n = 0, prev = null;
+      let n = 0;
+      let prev: unknown = null;
       if (strategy === 'bfill') {
         for (let i = rows.length - 1; i >= 0; i--) {
           if (isBlank(rows[i][col])) { if (prev !== null) { rows[i][col] = prev; n++; } }
@@ -325,7 +362,7 @@ const Clean = (function () {
     replace(rows, columns, op) {
       const col = op.column;
       if (!col || !headersOf(columns).includes(col)) return { rows, columns, affected: 0, summary: '字段不存在，跳过' };
-      const map = op.map && typeof op.map === 'object' ? op.map : { [op.from]: op.to };
+      const map: Record<string, unknown> = op.map && typeof op.map === 'object' ? op.map : { [String(op.from)]: op.to };
       let n = 0;
       rows.forEach((r) => {
         const key = String(r[col]);
@@ -340,7 +377,7 @@ const Clean = (function () {
     },
 
     normalize(rows, columns, op) {
-      const cols = (op.columns || [op.column]).filter((c) => c && headersOf(columns).includes(c));
+      const cols = (op.columns || [op.column]).filter((c): c is string => !!c && headersOf(columns).includes(c));
       const mode = op.mode || 'trim';
       let n = 0;
       rows.forEach((r) => {
@@ -355,7 +392,7 @@ const Clean = (function () {
           if (v !== before) { r[c] = v; n++; }
         });
       });
-      const label = { trim: '去除首尾空格', collapse: '合并多余空格', lower: '统一小写', upper: '统一大写', digits: '只保留数字', all: '空格规范化' }[mode] || mode;
+      const label = labelOf({ trim: '去除首尾空格', collapse: '合并多余空格', lower: '统一小写', upper: '统一大写', digits: '只保留数字', all: '空格规范化' }, mode);
       return { rows, columns, affected: n, summary: `${cols.join('、')} 已${label}，影响 ${n} 个值` };
     },
 
@@ -368,7 +405,7 @@ const Clean = (function () {
         const parts = String(r[col] === undefined ? '' : r[col]).split(delim);
         into.forEach((name, i) => { r[name] = parts[i] === undefined ? '' : parts[i].trim(); });
       });
-      const cols = rebuild(rows, columns.concat(into.map((n) => ({ name: n, type: 'string' }))));
+      const cols = rebuild(rows, columns.concat(into.map((n) => ({ name: n, type: 'string' as const }))));
       return { rows, columns: cols, affected: rows.length, summary: `「${col}」按「${delim}」拆分为：${into.join('、')}` };
     },
 
@@ -383,9 +420,9 @@ const Clean = (function () {
           const v = evalExpr(expr, r, names);
           r[name] = typeof v === 'number' ? (Math.round(v * 1000000) / 1000000) : (v === true || v === false ? String(v) : v);
           ok++;
-        } catch (e) { fail++; lastErr = e.message; r[name] = ''; }
+        } catch (e) { fail++; lastErr = errMsg(e); r[name] = ''; }
       });
-      const cols = rebuild(rows, columns.concat([{ name, type: 'string' }]));
+      const cols = rebuild(rows, columns.concat([{ name, type: 'string' as const }]));
       return { rows, columns: cols, affected: ok,
         summary: `新增字段「${name}」= ${expr}${fail ? `（${fail} 行计算失败${lastErr ? '：' + lastErr : ''}）` : ''}` };
     },
@@ -405,7 +442,7 @@ const Clean = (function () {
     sample(rows, columns, op) {
       const n = Math.max(1, Math.min(rows.length, Number(op.n) || rows.length));
       const mode = op.mode || 'head';
-      let out;
+      let out: DataRow[];
       if (mode === 'tail') out = rows.slice(-n);
       else if (mode === 'random') {
         const pool = rows.slice();
@@ -418,8 +455,8 @@ const Clean = (function () {
     clip(rows, columns, op) {
       const col = op.column;
       if (!col || !headersOf(columns).includes(col)) return { rows, columns, affected: 0, summary: '字段不存在，跳过' };
-      const min = op.min === undefined ? -Infinity : N(op.min);
-      const max = op.max === undefined ? Infinity : N(op.max);
+      const min = op.min === undefined ? -Infinity : N(op.min) ?? -Infinity;
+      const max = op.max === undefined ? Infinity : N(op.max) ?? Infinity;
       let n = 0;
       rows.forEach((r) => {
         const v = N(r[col]);
@@ -431,7 +468,7 @@ const Clean = (function () {
     },
   };
 
-  const OP_LABEL = {
+  const OP_LABEL: Record<string, string> = {
     drop_duplicates: '去重', fill_null: '填充缺失值', drop_null: '删除缺失行',
     keep_rows: '条件筛选', drop_rows: '条件删除', convert: '类型转换', rename: '字段改名',
     drop_columns: '删除字段', replace: '值替换', normalize: '文本规范化', split: '字段拆分',
@@ -439,25 +476,26 @@ const Clean = (function () {
   };
 
   /* ================= 主入口 ================= */
-  function run(rows, columns, ops) {
-    let cur = rows.map((r) => Object.assign({}, r));
-    let cols = columns;
-    const report = [];
+  function run(rows: DataRow[], columns: ColumnMeta[], ops?: CleanStep[]): CleanResult {
+    let cur: DataRow[] = rows.map((r) => Object.assign({}, r));
+    let cols: ColumnMeta[] = columns;
+    const report: CleanStepReport[] = [];
     const before = { rows: rows.length, cols: columns.length };
 
     (ops || []).forEach((op) => {
-      const fn = OPS[op && op.op];
-      if (!fn) {
-        report.push({ op: (op && op.op) || '未知', label: '不支持的操作', affected: 0, summary: '该操作未实现，已跳过' });
+      const name = (op && op.op) || '';
+      const fn = OPS[name];
+      if (typeof fn !== 'function') {
+        report.push({ op: name || '未知', label: '不支持的操作', affected: 0, summary: '该操作未实现，已跳过' });
         return;
       }
       try {
         const res = fn(cur, cols, op);
         cur = res.rows;
         cols = res.columns;
-        report.push({ op: op.op, label: OP_LABEL[op.op] || op.op, affected: res.affected, summary: res.summary });
+        report.push({ op: name, label: OP_LABEL[name] || name, affected: res.affected, summary: res.summary });
       } catch (e) {
-        report.push({ op: op.op, label: OP_LABEL[op.op] || op.op, affected: 0, summary: '执行失败：' + e.message });
+        report.push({ op: name, label: OP_LABEL[name] || name, affected: 0, summary: '执行失败：' + errMsg(e) });
       }
     });
 
@@ -469,6 +507,9 @@ const Clean = (function () {
       after: { rows: cur.length, cols: cols.length },
     };
   }
+
+  /** catch 出来的可能是任意东西，统一取一句人能看懂的话 */
+  const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
   return { run, evalExpr, isBlank };
 })();
