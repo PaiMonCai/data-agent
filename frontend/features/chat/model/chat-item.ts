@@ -1,3 +1,5 @@
+import type { ColumnMeta, DataRow } from "@/lib/types";
+
 export type ChatTask = "analyze" | "clean";
 
 export type ChatItem = {
@@ -56,7 +58,7 @@ export type AnalysisOutcome =
 export interface CleanResult {
   before: { rows: number; cols: number };
   after: { rows: number; cols: number };
-  columns: unknown[];
-  rows: unknown[];
+  columns: ColumnMeta[];
+  rows: DataRow[];
   report?: CleanStepReport[];
 }

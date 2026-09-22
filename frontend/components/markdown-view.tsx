@@ -24,7 +24,7 @@ function renderInline(nodes: InlineNode[], keyPrefix = ""): ReactNode[] {
       case "link":
         return (
           <a key={key} href={node.href} target="_blank" rel="noopener noreferrer" className="brand underline">
-            {renderInline(node.children, `${key}-")}
+            {renderInline(node.children, `${key}-`)}
           </a>
         );
       default:

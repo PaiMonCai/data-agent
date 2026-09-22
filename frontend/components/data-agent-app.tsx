@@ -312,25 +312,27 @@ export default function DataAgentApp() {
                   <p className="muted mt-3 text-xs">é¢è§å 100 è¡ï¼åææ¶ä½¿ç¨å®æ´ {current.rows.length.toLocaleString()} è¡ã</p>
                 </div>
               ) : (
-                <ChatMessageList
-                  messages={messages}
-                  theme={resolvedTheme}
-                  busy={busy}
-                  onAsk={(q) => void ask(q)}
-                  onApplyClean={applyClean}
-                  onRetry={(item) => void ask(item.question)}
-                />
+                <>
+                  <ChatMessageList
+                    messages={messages}
+                    theme={resolvedTheme}
+                    busy={busy}
+                    onAsk={(q) => void ask(q)}
+                    onApplyClean={applyClean}
+                    onRetry={(item) => void ask(item.question)}
+                  />
 
-                <div className="surface border-ui border-t p-4">
-                  <div className="surface-2 border-ui mx-auto flex max-w-4xl items-end gap-2 rounded-2xl border p-2 shadow-sm">
-                    <textarea value={question} onChange={(e) => setQuestion(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }}
-                      rows={2} placeholder="è¾å¥é®é¢ï¼ä¾å¦ï¼ææ¸ éæ¯è¾éå®é¢å¹¶è§£éå·®å¼"
-                      className="max-h-36 min-h-12 flex-1 resize-none bg-transparent px-3 py-2 outline-none"/>
-                    <button disabled={busy || !model || !question.trim()} onClick={() => void ask()}
-                      className="brand-bg grid size-11 shrink-0 place-items-center rounded-xl text-white disabled:opacity-40"><Send size={18}/></button>
+                  <div className="surface border-ui border-t p-4">
+                    <div className="surface-2 border-ui mx-auto flex max-w-4xl items-end gap-2 rounded-2xl border p-2 shadow-sm">
+                      <textarea value={question} onChange={(e) => setQuestion(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void ask(); } }}
+                        rows={2} placeholder="输入问题，例如：按渠道比较销售额并解释差异"
+                        className="max-h-36 min-h-12 flex-1 resize-none bg-transparent px-3 py-2 outline-none"/>
+                      <button disabled={busy || !model || !question.trim()} onClick={() => void ask()}
+                        className="brand-bg grid size-11 shrink-0 place-items-center rounded-xl text-white disabled:opacity-40"><Send size={18}/></button>
+                    </div>
                   </div>
-                </div>
+                </>
               )}
             </div>
           )}
