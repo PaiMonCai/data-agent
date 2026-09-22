@@ -124,6 +124,36 @@ const auth = {
     wrapped(() => request("/auth/logout", { method: "POST", body: "{}" })),
 };
 
+export interface AdminMailSettings {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  from: string;
+  configured: boolean;
+  hasPassword: boolean;
+  source: "database" | "environment";
+}
+
+const admin = {
+  getMail: () => withAuthRetry(() => request<AdminMailSettings>("/admin/settings/mail")),
+  saveMail: (payload: {
+    host: string;
+    port: number;
+    secure: boolean;
+    user: string;
+    password?: string;
+    from: string;
+  }) => withAuthRetry(() => request<AdminMailSettings>("/admin/settings/mail", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  })),
+  testMail: (email?: string) => withAuthRetry(() => request<{ ok: boolean }>("/admin/settings/mail/test", {
+    method: "POST",
+    body: JSON.stringify(email ? { email } : {}),
+  })),
+};
+
 const db = {
   async list(table: string, opts: {
     select?: string;
@@ -293,6 +323,7 @@ export async function listHistory(datasetId: string): Promise<AnalysisHistory[]>
 export const Cloud = {
   client: () => ({ auth }),
   auth,
+  admin,
   db,
   session,
   models,
