@@ -45,7 +45,28 @@ jobs:
         shell: bash
         run: |
           npm audit --json > /tmp/server-audit.json || true
-          node -e 'const a=require("/tmp/server-audit.json"); console.log(JSON.stringify(a.metadata?.vulnerabilities || {}, null, 2))'
+          node <<'NODE'
+          const a = require("/tmp/server-audit.json");
+          console.log("COUNTS", JSON.stringify(a.metadata?.vulnerabilities || {}));
+          for (const [name, v] of Object.entries(a.vulnerabilities || {})) {
+            console.log("VULN", JSON.stringify({
+              name,
+              severity: v.severity,
+              isDirect: v.isDirect,
+              range: v.range,
+              nodes: v.nodes,
+              via: (v.via || []).map((x) => typeof x === "string" ? x : ({
+                source: x.source,
+                name: x.name,
+                title: x.title,
+                severity: x.severity,
+                range: x.range,
+                url: x.url
+              })),
+              fixAvailable: v.fixAvailable
+            }));
+          }
+          NODE
 
       - name: Commit lockfiles
         shell: bash
