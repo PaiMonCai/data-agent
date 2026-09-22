@@ -18,9 +18,9 @@ COPY server/prisma.config.ts ./
 COPY server/tsconfig.json ./
 COPY server/src ./src
 
-ENV DATABASE_URL=postgresql://data_agent:build@127.0.0.1:5432/data_agent
-ENV SESSION_SECRET=build-only-session-secret-32-characters-long
-RUN npm run build
+RUN DATABASE_URL=postgresql://data_agent:build@127.0.0.1:5432/data_agent \
+    SESSION_SECRET=build-only-session-secret-32-characters-long \
+    npm run build
 
 FROM node:22-alpine AS runtime
 WORKDIR /app/server
