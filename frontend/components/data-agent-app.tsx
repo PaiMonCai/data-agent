@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import {
-  BarChart3, ChevronDown, LogOut, Menu, Moon, Send, Settings, Sun, Table2, Trash2, Upload, Zap,
+  BarChart3, ChevronDown, LogOut, Menu, Moon, Send, Settings, Shield, Sun, Table2, Trash2, Upload, Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AuthView from "@/features/auth/components/auth-view";
@@ -207,6 +207,10 @@ export default function DataAgentApp() {
             className="muted rounded-lg p-2 hover:surface-2">{resolvedTheme === "dark" ? <Sun size={18}/> : <Moon size={18}/>}</button>
           <button onClick={() => setSettingsOpen(true)} aria-label="打开设置"
             className="muted rounded-lg p-2 hover:surface-2"><Settings size={18}/></button>
+          {user.role === "admin" && (
+            <a href="/admin/" aria-label="打开管理中心" title="管理中心"
+              className="muted rounded-lg p-2 hover:surface-2"><Shield size={18}/></a>
+          )}
           <button onClick={() => void logout()} aria-label="退出登录" title={user.email}
             className="muted rounded-lg p-2 hover:surface-2"><LogOut size={18}/></button>
         </div>
@@ -300,7 +304,7 @@ export default function DataAgentApp() {
       </div>
 
       {importOpen && <ImportDialog onClose={() => setImportOpen(false)} onImported={imported}/>}
-      {settingsOpen && <SettingsDialog settings={settingsState} onChange={updateSettings} models={models} user={user} onClose={() => setSettingsOpen(false)}/>}
+      {settingsOpen && <SettingsDialog settings={settingsState} onChange={updateSettings} models={models} onClose={() => setSettingsOpen(false)}/>} 
     </div>
   );
 }
