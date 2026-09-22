@@ -1,5 +1,85 @@
-// @ts-nocheck
 import { Parse } from "./parse";
+import type { DataRow, ParsedTable } from "./types";
+
+/* statfmt 只发 JS、不带类型，这里按 CDN 上那几个子模块的实际导出逐个声明。
+   只覆盖 dta 分支真正用到的部分，其余交给 unknown。 */
+
+/** statfmt 里带 toJS() 的标量值 */
+interface StatfmtValue {
+  toJS?: () => unknown;
+}
+
+/** statfmt 变量元信息对象的读取接口 */
+interface StatfmtVariableMeta {
+  getName?: () => string;
+  getLabel?: () => string | null;
+  getFormat?: () => string | null;
+  type: unknown;
+}
+
+export interface StataValueLabel {
+  value: unknown;
+  label: string;
+}
+
+/** 我们自己维护的变量表顿；valueLabels 在解析完成后回填 */
+interface StataVariable {
+  index: number;
+  name: string;
+  label: string | null;
+  type: unknown;
+  format: string | null;
+  valueLabelsName: string | null;
+  valueLabels: StataValueLabel[] | null;
+}
+
+interface StataDataset {
+  metadata: Record<string, unknown>;
+  variables: StataVariable[];
+  rows: unknown[][];
+}
+
+interface StatfmtParser {
+  setCodec?: (codec: unknown) => void;
+  setMetadataHandler(handler: (meta: Record<string, unknown>) => void): void;
+  setVariableHandler(
+    handler: (index: number, meta: StatfmtVariableMeta, valueLabelsName: string | null) => void
+  ): void;
+  setValueHandler(
+    handler: (obsIndex: number, variable: { index: number }, value: StatfmtValue | null) => void
+  ): void;
+  setValueLabelHandler(
+    handler: (name: string, value: StatfmtValue | null, label: string) => void
+  ): void;
+}
+
+interface StatfmtIoContext {}
+
+interface StatfmtParserModule {
+  ReadStatParser: new () => StatfmtParser;
+}
+
+interface StatfmtIoModule {
+  BufferIoContext: new (bytes: Uint8Array) => StatfmtIoContext;
+}
+
+interface StatfmtErrorModule {
+  ReadStatError: { OK: number };
+  readstatErrorMessage?: (code: number) => string;
+}
+
+interface StatfmtDtaModule {
+  parseDta: (parser: StatfmtParser, io: StatfmtIoContext, opts: unknown) => number;
+}
+
+/** load() 缓存起来的部件，也就是上面四个子模块的合集 */
+interface StatfmtModules {
+  ReadStatParser: StatfmtParserModule["ReadStatParser"];
+  BufferIoContext: StatfmtIoModule["BufferIoContext"];
+  ReadStatError: StatfmtErrorModule["ReadStatError"];
+  readstatErrorMessage: StatfmtErrorModule["readstatErrorMessage"];
+  parseDta: StatfmtDtaModule["parseDta"];
+}
 
 /* Stata .dta 解析适配器
    底层用 @irbisadm/statfmt（ReadStat 的纯 TypeScript 移植，无 WASM、无原生依赖），
@@ -8,17 +88,18 @@ import { Parse } from "./parse";
    所以这里只 import Stata 用到的几个子模块，绕开顶层入口。 */
 const Dta = (function () {
   const CDN = 'https://cdn.jsdelivr.net/npm/@irbisadm/statfmt@0.1.1/dist/';
-  let cache = null;
-  const remoteImport = (url) => new Function('u', 'return import(u)')(url);
+  let cache: StatfmtModules | null = null;
+  /** CDN 上的模块是运行时才拿到的，类型只能由调用方逐个给出 */
+  const remoteImport = <T>(url: string): Promise<T> => new Function('u', 'return import(u)')(url);
 
-  async function load(base) {
+  async function load(base?: string): Promise<StatfmtModules> {
     if (cache) return cache;
     const b = base || CDN;
     const [parserMod, ioMod, errMod, dtaMod] = await Promise.all([
-      remoteImport(b + 'parser.js'),
-      remoteImport(b + 'io.js'),
-      remoteImport(b + 'errors.js'),
-      remoteImport(b + 'stata/dta-read.js'),
+      remoteImport<StatfmtParserModule>(b + 'parser.js'),
+      remoteImport<StatfmtIoModule>(b + 'io.js'),
+      remoteImport<StatfmtErrorModule>(b + 'errors.js'),
+      remoteImport<StatfmtDtaModule>(b + 'stata/dta-read.js'),
     ]);
     cache = {
       ReadStatParser: parserMod.ReadStatParser,
@@ -35,15 +116,15 @@ const Dta = (function () {
      这里注入一个解码器：先按 UTF-8 严格解，不合法再退回库原本指定的编码，
      这样中文 UTF-8 文件和真正的西欧 cp1252 文件都能正确显示。 */
   function makeCodec() {
-    const cache = new Map();
-    const dec = (label, fatal) => {
+    const cache = new Map<string, TextDecoder>();
+    const dec = (label: string, fatal: boolean): TextDecoder => {
       const k = label + (fatal ? '!' : '');
       let d = cache.get(k);
       if (!d) cache.set(k, (d = new TextDecoder(label, { fatal })));
       return d;
     };
     return {
-      decode(bytes, encoding) {
+      decode(bytes: Uint8Array, encoding?: string | null): string {
         try { return dec('utf-8', true).decode(bytes); } catch (e) { /* 不是 UTF-8，走原编码 */ }
         const label = String(encoding || 'utf-8').toLowerCase();
         try { return dec(label, false).decode(bytes); } catch (e) { return dec('iso-8859-1', false).decode(bytes); }
@@ -52,15 +133,15 @@ const Dta = (function () {
   }
 
   // 复刻 statfmt 的 readData('dta')，但只依赖 Stata 子模块
-  async function readDataset(bytes, base) {
+  async function readDataset(bytes: Uint8Array, base?: string): Promise<StataDataset> {
     const M = await load(base);
     const parser = new M.ReadStatParser();
     if (parser.setCodec) parser.setCodec(makeCodec());
-    let metadata = null;
-    const variables = [];
-    const rows = [];
-    const labelSets = new Map();
-    const varsByLabelName = new Map();
+    let metadata: Record<string, unknown> | null = null;
+    const variables: StataVariable[] = [];
+    const rows: unknown[][] = [];
+    const labelSets = new Map<string, StataValueLabel[]>();
+    const varsByLabelName = new Map<string, StataVariable[]>();
 
     parser.setMetadataHandler((m) => { metadata = m; });
     parser.setVariableHandler((index, v, valLabels) => {
@@ -102,7 +183,7 @@ const Dta = (function () {
     return { metadata: metadata || {}, variables: variables.filter(Boolean), rows };
   }
 
-  function cellToValue(v) {
+  function cellToValue(v: unknown): unknown {
     if (v === null || v === undefined) return '';
     if (v instanceof Date) {
       const y = v.getFullYear(), m = String(v.getMonth() + 1).padStart(2, '0'), d = String(v.getDate()).padStart(2, '0');
@@ -114,14 +195,14 @@ const Dta = (function () {
 
   /* 转成应用内部表格结构：{ headers, rows, columns, meta }
      带值标签的字段（1=男 / 2=女）默认还原成文字，便于分组分析和看图 */
-  async function read(bytes, base) {
+  async function read(bytes: Uint8Array, base?: string): Promise<ParsedTable> {
     const ds = await readDataset(bytes, base);
     const variables = ds.variables;
     const headers = variables.map((v) => v.name);
-    const applied = [];
+    const applied: Array<{ field: string; map: string }> = [];
 
     const rows = ds.rows.map((arr) => {
-      const o = {};
+      const o: DataRow = {};
       variables.forEach((v) => {
         let val = cellToValue(arr[v.index]);
         if (v.valueLabels && v.valueLabels.length) {
