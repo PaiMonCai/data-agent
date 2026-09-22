@@ -297,7 +297,6 @@ select {
   animation: slideDown .22s var(--ease);
 }
 .banner::before { content: ''; width: 3px; align-self: stretch; border-radius: 2px; background: currentColor; opacity: .5; flex: none; }
-.banner.warn { background: var(--warn-soft); border-bottom-color: #f5dcae; color: #92610a; }
 .banner.error { background: var(--danger-soft); border-bottom-color: #f6ccce; color: #a9232a; }
 .banner .btn { flex: none; }
 .banner a { color: inherit; font-weight: 600; }

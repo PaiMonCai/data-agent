@@ -368,11 +368,6 @@ window.Cloud = (function () {
     return msg;
   }
 
-  /* 同源 /api 不再依赖第三方平台的 Origin 白名单。 */
-  function originOk() {
-    return true;
-  }
-
   return {
     client,
     session,
@@ -381,7 +376,6 @@ window.Cloud = (function () {
     chat,
     models,
     errText,
-    originOk,
     isAuthError,
   };
 })();

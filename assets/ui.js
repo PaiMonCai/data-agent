@@ -56,7 +56,6 @@
     const chip = $('#user-chip');
     chip.innerHTML = '<span class="nm"></span>' + ICON('logout');
     chip.querySelector('.nm').textContent = email;
-    checkEnv();
     await loadModels();
     await loadDatasets();
   }
@@ -77,16 +76,6 @@
     const prev = card.previousElementSibling;
     if (prev && prev.classList.contains('bubble-user')) prev.remove();
     card.remove();
-  }
-
-  // 云服务按发布域名做精确 Origin 校验，在预览面板里打开会整体不可用
-  function checkEnv() {
-    if (Cloud.originOk()) return;
-    const ep = window.PUBLIC_CONFIG.endpoint;
-    const el = $('#env-warning');
-    el.hidden = false;
-    $('#env-warning-text').innerHTML = '当前页面不是从已发布域名打开的，云服务的登录与模型调用会被拒绝。请改用：<a href="' + esc(ep) + '" target="_blank" rel="noopener">' + esc(ep) + '</a>';
-    fitLayout();
   }
 
   /* ---------------- 设置中心 ---------------- */
