@@ -1,22 +1,29 @@
 import { ApiError, decryptSystemSecret, encryptSystemSecret, env, prisma } from "./lib.js";
 
-export type LlmModelChannel = {
-  publicModel: string;
-  upstreamModel: string;
-  enabled: boolean;
-};
-
 export type LlmProviderConfig = {
   id: string;
   name: string;
   baseUrl: string;
   apiKey: string;
-  models: LlmModelChannel[];
+  models: string[];
   enabled: boolean;
   source: "database" | "environment";
 };
 
-export type LlmRoutingStrategy = "round_robin" | "priority";
+export type LlmChannelConfig = {
+  id: string;
+  providerId: string;
+  upstreamModel: string;
+  enabled: boolean;
+};
+
+export type LlmLogicalModelConfig = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  strategy: "round_robin";
+  channels: LlmChannelConfig[];
+};
 
 type StoredProvider = {
   id?: unknown;
@@ -27,38 +34,26 @@ type StoredProvider = {
   enabled?: unknown;
 };
 
-function cleanModelChannels(value: unknown): LlmModelChannel[] {
-  const list = Array.isArray(value) ? value : [];
-  const out: LlmModelChannel[] = [];
-  for (const item of list) {
-    if (typeof item === "string") {
-      const model = item.trim();
-      if (model) out.push({ publicModel: model, upstreamModel: model, enabled: true });
-      continue;
-    }
-    if (!item || typeof item !== "object") continue;
-    const row = item as Record<string, unknown>;
-    const publicModel = String(row.publicModel || row.model || "").trim();
-    const upstreamModel = String(row.upstreamModel || publicModel).trim();
-    if (!publicModel || !upstreamModel) continue;
-    out.push({
-      publicModel,
-      upstreamModel,
-      enabled: row.enabled !== false,
-    });
-  }
-  return out.slice(0, 500);
-}
+type StoredChannel = {
+  id?: unknown;
+  providerId?: unknown;
+  upstreamModel?: unknown;
+  enabled?: unknown;
+};
 
-function cleanRouting(value: unknown): Record<string, LlmRoutingStrategy> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const out: Record<string, LlmRoutingStrategy> = {};
-  for (const [model, strategy] of Object.entries(value as Record<string, unknown>)) {
-    const key = model.trim();
-    if (!key) continue;
-    out[key] = strategy === "priority" ? "priority" : "round_robin";
-  }
-  return out;
+type StoredLogicalModel = {
+  id?: unknown;
+  name?: unknown;
+  enabled?: unknown;
+  strategy?: unknown;
+  channels?: unknown;
+};
+
+const roundRobinCursor = new Map<string, number>();
+
+function cleanModels(value: unknown) {
+  const list = Array.isArray(value) ? value : [];
+  return [...new Set(list.map((x) => String(x).trim()).filter(Boolean))].slice(0, 200);
 }
 
 function normalizeBaseUrl(value: unknown) {
@@ -72,24 +67,21 @@ function envProvider(): LlmProviderConfig | null {
     name: "Environment",
     baseUrl: env.llmBaseUrl,
     apiKey: env.llmApiKey,
-    models: env.llmModels.map((model) => ({
-      publicModel: model,
-      upstreamModel: model,
-      enabled: true,
-    })),
+    models: [...env.llmModels],
     enabled: true,
     source: "environment",
   };
 }
 
-async function rawLlmSetting() {
-  return prisma.systemSetting.findUnique({ where: { key: "llm" } });
+async function loadRawSetting() {
+  const stored = await prisma.systemSetting.findUnique({ where: { key: "llm" } });
+  return {
+    stored,
+    raw: (stored?.value || {}) as Record<string, unknown>,
+  };
 }
 
-export async function resolveLlmProviders(): Promise<LlmProviderConfig[]> {
-  const stored = await rawLlmSetting();
-  const raw = (stored?.value || {}) as Record<string, unknown>;
-
+function providersFromRaw(stored: Awaited<ReturnType<typeof loadRawSetting>>["stored"], raw: Record<string, unknown>) {
   if (stored && Array.isArray(raw.providers)) {
     return (raw.providers as StoredProvider[])
       .map((item) => ({
@@ -97,7 +89,7 @@ export async function resolveLlmProviders(): Promise<LlmProviderConfig[]> {
         name: String(item.name || item.id || "").trim(),
         baseUrl: normalizeBaseUrl(item.baseUrl),
         apiKey: decryptSystemSecret(String(item.apiKey || "")),
-        models: cleanModelChannels(item.models),
+        models: cleanModels(item.models),
         enabled: item.enabled !== false,
         source: "database" as const,
       }))
@@ -108,14 +100,72 @@ export async function resolveLlmProviders(): Promise<LlmProviderConfig[]> {
   return fallback ? [fallback] : [];
 }
 
-export async function resolveRouting() {
-  const stored = await rawLlmSetting();
-  const raw = (stored?.value || {}) as Record<string, unknown>;
-  return cleanRouting(raw.routing);
+function deriveLogicalModels(providers: LlmProviderConfig[]): LlmLogicalModelConfig[] {
+  const grouped = new Map<string, LlmLogicalModelConfig>();
+
+  for (const provider of providers) {
+    for (const upstreamModel of provider.models) {
+      let logical = grouped.get(upstreamModel);
+      if (!logical) {
+        logical = {
+          id: upstreamModel,
+          name: upstreamModel,
+          enabled: true,
+          strategy: "round_robin",
+          channels: [],
+        };
+        grouped.set(upstreamModel, logical);
+      }
+
+      logical.channels.push({
+        id: `${provider.id}::${upstreamModel}`,
+        providerId: provider.id,
+        upstreamModel,
+        enabled: true,
+      });
+    }
+  }
+
+  return [...grouped.values()];
+}
+
+function logicalModelsFromRaw(raw: Record<string, unknown>, providers: LlmProviderConfig[]) {
+  if (!Array.isArray(raw.models)) return deriveLogicalModels(providers);
+
+  return (raw.models as StoredLogicalModel[])
+    .map((item) => {
+      const channelsRaw = Array.isArray(item.channels) ? item.channels as StoredChannel[] : [];
+      return {
+        id: String(item.id || "").trim(),
+        name: String(item.name || item.id || "").trim(),
+        enabled: item.enabled !== false,
+        strategy: "round_robin" as const,
+        channels: channelsRaw
+          .map((channel) => ({
+            id: String(channel.id || "").trim(),
+            providerId: String(channel.providerId || "").trim(),
+            upstreamModel: String(channel.upstreamModel || "").trim(),
+            enabled: channel.enabled !== false,
+          }))
+          .filter((channel) => channel.id && channel.providerId && channel.upstreamModel),
+      };
+    })
+    .filter((item) => item.id && item.name);
+}
+
+export async function resolveLlmConfig() {
+  const { stored, raw } = await loadRawSetting();
+  const providers = providersFromRaw(stored, raw);
+  const models = logicalModelsFromRaw(raw, providers);
+  return { providers, models };
+}
+
+export async function resolveLlmProviders(): Promise<LlmProviderConfig[]> {
+  return (await resolveLlmConfig()).providers;
 }
 
 export async function publicLlmSettings() {
-  const [providers, routing] = await Promise.all([resolveLlmProviders(), resolveRouting()]);
+  const { providers, models } = await resolveLlmConfig();
   return {
     source: providers.some((x) => x.source === "database") ? "database" as const : "environment" as const,
     providers: providers.map((p) => ({
@@ -127,7 +177,7 @@ export async function publicLlmSettings() {
       hasApiKey: Boolean(p.apiKey),
       source: p.source,
     })),
-    routing,
+    models,
   };
 }
 
@@ -137,12 +187,23 @@ export async function saveLlmSettings(input: {
     name: string;
     baseUrl: string;
     apiKey?: string;
-    models: LlmModelChannel[];
+    models: string[];
     enabled: boolean;
   }>;
-  routing?: Record<string, LlmRoutingStrategy>;
+  models: Array<{
+    id: string;
+    name: string;
+    enabled: boolean;
+    strategy: "round_robin";
+    channels: Array<{
+      id: string;
+      providerId: string;
+      upstreamModel: string;
+      enabled: boolean;
+    }>;
+  }>;
 }) {
-  const previous = await rawLlmSetting();
+  const previous = await prisma.systemSetting.findUnique({ where: { key: "llm" } });
   const oldRaw = (previous?.value || {}) as Record<string, unknown>;
   const oldProviders = Array.isArray(oldRaw.providers) ? oldRaw.providers as StoredProvider[] : [];
   const effective = await resolveLlmProviders();
@@ -160,19 +221,31 @@ export async function saveLlmSettings(input: {
       name: provider.name,
       baseUrl: normalizeBaseUrl(provider.baseUrl),
       apiKey: key,
-      models: cleanModelChannels(provider.models),
+      models: cleanModels(provider.models),
       enabled: provider.enabled,
     };
   });
 
-  const routing = cleanRouting(input.routing || oldRaw.routing);
+  const models = input.models.map((model) => ({
+    id: model.id.trim(),
+    name: model.name.trim(),
+    enabled: model.enabled,
+    strategy: "round_robin",
+    channels: model.channels.map((channel) => ({
+      id: channel.id.trim(),
+      providerId: channel.providerId.trim(),
+      upstreamModel: channel.upstreamModel.trim(),
+      enabled: channel.enabled,
+    })),
+  }));
 
   await prisma.systemSetting.upsert({
     where: { key: "llm" },
-    create: { key: "llm", value: { providers, routing } },
-    update: { value: { providers, routing } },
+    create: { key: "llm", value: { providers, models } },
+    update: { value: { providers, models } },
   });
 
+  roundRobinCursor.clear();
   return publicLlmSettings();
 }
 
@@ -218,55 +291,48 @@ export async function discoverLlmModels(providerId: string) {
   return { models };
 }
 
-const rrCursor = new Map<string, number>();
-
 export async function resolveRequestedModel(requested: string) {
-  const [providers, routing] = await Promise.all([resolveLlmProviders(), resolveRouting()]);
-  const channels = providers
-    .filter((provider) => provider.enabled)
-    .flatMap((provider) => {
-      const configured = provider.models
-        .filter((model) => model.enabled && model.publicModel === requested)
-        .map((model) => ({ provider, model: model.upstreamModel }));
-      if (configured.length) return configured;
-      if (provider.source === "environment" && provider.models.length === 0) {
-        return [{ provider, model: requested }];
-      }
-      return [];
-    });
+  const { providers, models } = await resolveLlmConfig();
+  const providerMap = new Map(providers.filter((p) => p.enabled).map((p) => [p.id, p]));
+  const logical = models.find((model) => model.enabled && model.id === requested);
 
-  if (!channels.length) {
-    throw new ApiError(400, "llm_model_invalid", "模型不存在或没有可用渠道");
+  if (!logical) {
+    throw new ApiError(400, "llm_model_invalid", "模型不存在或已停用");
   }
 
-  const strategy = routing[requested] || "round_robin";
-  if (strategy === "priority" || channels.length === 1) return channels[0];
+  const usable = logical.channels
+    .map((channel) => ({ channel, provider: providerMap.get(channel.providerId) }))
+    .filter((entry): entry is { channel: LlmChannelConfig; provider: LlmProviderConfig } =>
+      entry.channel.enabled && Boolean(entry.provider)
+    );
 
-  const cursor = rrCursor.get(requested) || 0;
-  const selected = channels[cursor % channels.length];
-  rrCursor.set(requested, (cursor + 1) % channels.length);
-  return selected;
+  if (!usable.length) {
+    throw new ApiError(503, "llm_model_no_channel", "该模型当前没有可用渠道");
+  }
+
+  const cursor = roundRobinCursor.get(logical.id) || 0;
+  const selected = usable[cursor % usable.length];
+  roundRobinCursor.set(logical.id, (cursor + 1) % Math.max(usable.length, 1));
+
+  return {
+    provider: selected.provider,
+    model: selected.channel.upstreamModel,
+    channel: selected.channel,
+    logicalModel: logical,
+  };
 }
 
 export async function listPublicModels() {
-  const providers = (await resolveLlmProviders()).filter((x) => x.enabled);
-  const names = new Set<string>();
+  const { providers, models } = await resolveLlmConfig();
+  const enabledProviders = new Set(providers.filter((p) => p.enabled).map((p) => p.id));
 
-  for (const provider of providers) {
-    if (provider.models.length === 0 && provider.source === "environment") {
-      try {
-        const discovered = await discoverLlmModels(provider.id);
-        for (const model of discovered.models) names.add(model);
-      } catch {}
-      continue;
-    }
-    for (const model of provider.models) {
-      if (model.enabled) names.add(model.publicModel);
-    }
-  }
-
-  return [...names].sort().map((model) => ({
-    id: model,
-    name: model,
-  }));
+  return models
+    .filter((model) =>
+      model.enabled &&
+      model.channels.some((channel) => channel.enabled && enabledProviders.has(channel.providerId))
+    )
+    .map((model) => ({
+      id: model.id,
+      name: model.name,
+    }));
 }
