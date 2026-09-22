@@ -124,6 +124,15 @@ jobs:
           test "$RATE_STATUS" = "429"
           grep -q '"llm_rate_minute"' /tmp/rate.json
 
+      - name: Validate Compose deployment
+        working-directory: .
+        env:
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+          POSTGRES_PASSWORD: ci-password
+          SESSION_SECRET: ci-session-secret-that-is-at-least-32-characters
+          LLM_BASE_URL: http://127.0.0.1:4010/v1
+        run: docker compose config --quiet
+
       - name: Docker image build
         working-directory: .
         run: docker build -f server/Dockerfile .

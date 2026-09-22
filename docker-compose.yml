@@ -15,9 +15,8 @@ services:
       retries: 20
 
   app:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
+    image: ${DATA_AGENT_IMAGE:-ghcr.io/paimoncai/data-agent:latest}
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       postgres:
@@ -47,6 +46,16 @@ services:
       SMTP_FROM: ${SMTP_FROM:-Data Agent <no-reply@example.com>}
     ports:
       - "${APP_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 volumes:
   data-agent-postgres:
