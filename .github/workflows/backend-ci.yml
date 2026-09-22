@@ -104,7 +104,7 @@ jobs:
         run: |
           sudo docker run -d --name data-agent-host-postgres-ci \
             -e POSTGRES_USER=postgres \
-            -e POSTGRES_PASSWORD=ci-root-password \
+            -e "POSTGRES_PASSWORD=ci-root-pa'ss" \
             -e POSTGRES_DB=postgres \
             postgres:17-alpine >/dev/null
           trap 'sudo docker rm -f data-agent-host-postgres-ci >/dev/null 2>&1 || true; sudo docker network rm data-agent-db-link >/dev/null 2>&1 || true; sudo rm -rf /tmp/data-agent-installer-host' EXIT
