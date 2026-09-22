@@ -330,6 +330,9 @@ configure_admin() {
   (("${#ADMIN_PASSWORD}" >= 8)) || die "administrator password must be at least 8 characters"
 
   SESSION_SECRET="${SESSION_SECRET:-$(random_hex 32)}"
+  if [[ -z "$SYSTEM_CONFIG_ENCRYPTION_KEY" && "$ASSUME_YES" -eq 0 ]]; then
+    SYSTEM_CONFIG_ENCRYPTION_KEY="$(prompt_secret "System config encryption key (blank = auto-generate; reuse the old key when reconnecting an existing Data Agent database)" "")"
+  fi
   SYSTEM_CONFIG_ENCRYPTION_KEY="${SYSTEM_CONFIG_ENCRYPTION_KEY:-$(random_hex 32)}"
 }
 
@@ -598,6 +601,9 @@ EOF
 
   if wait_for_health; then
     clear_bootstrap_password
+    log "removing bootstrap administrator password from the running container..."
+    docker compose up -d --force-recreate app >/dev/null
+    wait_for_health || die "Data Agent failed health validation after removing bootstrap credentials"
   else
     die "Data Agent started but failed health validation"
   fi
