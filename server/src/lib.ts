@@ -48,6 +48,10 @@ export const env = {
     .split(",")
     .map((x) => x.trim())
     .filter(Boolean),
+  llmRequestsPerMinute: intEnv("LLM_REQUESTS_PER_MINUTE", 10),
+  llmRequestsPerDay: intEnv("LLM_REQUESTS_PER_DAY", 300),
+  llmMaxInputChars: intEnv("LLM_MAX_INPUT_CHARS", 200000),
+  llmTimeoutMs: intEnv("LLM_TIMEOUT_MS", 180000),
   mailMode: (process.env.MAIL_MODE || (process.env.SMTP_HOST ? "smtp" : "console")).toLowerCase(),
   smtpHost: process.env.SMTP_HOST || "",
   smtpPort: intEnv("SMTP_PORT", 587),
