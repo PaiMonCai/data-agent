@@ -89,6 +89,68 @@ async function ensureDatasetOwned(userId: string, datasetId: string) {
   if (!ds) throw new ApiError(403, "dataset_forbidden", "无权访问该数据集");
 }
 
+router.post("/import", async (c) => {
+  try {
+    const user = c.get("user");
+    const body = await c.req.json().catch(() => null);
+
+    if (!body || typeof body !== "object") {
+      throw new ApiError(400, "request_invalid", "请求体必须是 JSON");
+    }
+
+    const name = String(body.name || "").trim().slice(0, 60);
+    const source = String(body.source || "file").slice(0, 30);
+    const columns = body.columns;
+    const rows = body.rows;
+
+    if (!name) throw new ApiError(400, "request_invalid", "数据集名称不能为空");
+    if (!Array.isArray(columns) || columns.length > 500) {
+      throw new ApiError(400, "request_invalid", "columns 必须是数组且最多 500 个字段");
+    }
+    if (!Array.isArray(rows) || rows.length === 0) {
+      throw new ApiError(400, "request_invalid", "rows 必须是非空数组");
+    }
+    if (rows.length > 20_000) {
+      throw new ApiError(413, "dataset_too_large", "单数据集最多允许 20000 行");
+    }
+    if (rows.some((row: unknown) => !row || typeof row !== "object" || Array.isArray(row))) {
+      throw new ApiError(400, "request_invalid", "每一行数据都必须是对象");
+    }
+
+    const dataset = await prisma.$transaction(async (tx) => {
+      const created = await tx.dataset.create({
+        data: {
+          user_id: user.id,
+          name,
+          source,
+          columns,
+          row_count: rows.length,
+        },
+      });
+
+      const chunkSize = 400;
+      for (let i = 0; i < rows.length; i += chunkSize) {
+        const chunk = rows.slice(i, i + chunkSize).map((data: any, offset: number) => ({
+          user_id: user.id,
+          dataset_id: created.id,
+          row_index: i + offset,
+          data,
+        }));
+        await tx.datasetRow.createMany({ data: chunk });
+      }
+
+      return created;
+    }, {
+      maxWait: 10_000,
+      timeout: 120_000,
+    });
+
+    return c.json([pick(dataset as any, null)], 201);
+  } catch (e) {
+    return jsonError(c, e);
+  }
+});
+
 router.get("/:table", async (c) => {
   try {
     const tableParsed = tableSchema.safeParse(c.req.param("table"));
