@@ -1,19 +1,24 @@
 "use client";
 
 import {
-  BarChart3, Database, FileSpreadsheet, LogOut, Menu, Moon, Plus, Search,
+  BarChart3, FileSpreadsheet, LogOut, Menu, Moon,
   Send, Settings, Sparkles, Sun, Table2, Trash2, Upload, X, Zap, ChevronDown,
-  RotateCcw, Check, AlertTriangle
+  RotateCcw, AlertTriangle
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import ChartView from "./chart-view";
+import { memo, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import dynamic from "next/dynamic";
+import Sidebar from "./sidebar";
 import { Agent } from "@/lib/agent";
 import { Cloud, listDatasets, listHistory, loadDatasetRows } from "@/lib/api";
+import { fmtDate } from "@/lib/format";
 import { Parse } from "@/lib/parse";
 import { applyTheme, defaultSettings, loadSettings, saveSettings } from "@/lib/settings";
 import type {
   AnalysisHistory, AppSettings, Dataset, DatasetMeta, ModelInfo, ParsedTable, User
 } from "@/lib/types";
+
+// echarts 体积很大，按需懒加载，避免首屏就要下载整个图表库
+const ChartView = dynamic(() => import("./chart-view"), { ssr: false });
 
 type ChatItem = {
   id: string;
@@ -39,12 +44,6 @@ function uid() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2);
-}
-
-function fmtDate(value?: string) {
-  if (!value) return "";
-  try { return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }); }
-  catch { return value; }
 }
 
 function AuthView({ onAuthed }: { onAuthed: (user: User) => void }) {
@@ -365,7 +364,7 @@ function SettingToggle({ label, value, onChange }: { label:string; value:boolean
   </button>;
 }
 
-function ResultCard({ item, theme, onApplyClean }: {
+const ResultCard = memo(function ResultCard({ item, theme, onApplyClean }: {
   item: ChatItem; theme: string; onApplyClean: (item: ChatItem) => Promise<void>;
 }) {
   const result = item.result;
@@ -426,7 +425,7 @@ function ResultCard({ item, theme, onApplyClean }: {
       {item.report && <div className="mt-5 whitespace-pre-wrap text-sm leading-7">{item.report}</div>}
     </div>
   );
-}
+});
 
 export default function DataAgentApp() {
   const [booting, setBooting] = useState(true);
@@ -445,18 +444,40 @@ export default function DataAgentApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
 
-  const resolvedTheme = useMemo(() => {
-    if (settingsState.theme !== "system") return settingsState.theme;
-    if (typeof window === "undefined") return "light";
-    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  }, [settingsState.theme]);
+  const [systemDark, setSystemDark] = useState(false);
 
-  const updateSettings = (next: AppSettings) => {
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setSystemDark(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  const resolvedTheme = useMemo(
+    () => (settingsState.theme === "system" ? (systemDark ? "dark" : "light") : settingsState.theme),
+    [settingsState.theme, systemDark]
+  );
+
+  const updateSettings = useCallback((next: AppSettings) => {
     setSettingsState(next);
     saveSettings(next);
     applyTheme(next.theme);
     if (next.model) setModel(next.model);
-  };
+  }, []);
+
+  const openImport = useCallback(() => setImportOpen(true), []);
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const closeMobileSidebar = useCallback(() => setMobileSidebar(false), []);
+
+  const loadHistoryItem = useCallback((h: AnalysisHistory) => {
+    setMessages((prev) => [...prev, {
+      id: uid(), question: h.question, plan: h.plan,
+      result: h.result, report: h.summary || "", task: "analyze" as const, stage: fmtDate(h.created_at),
+    }]);
+    setView("chat");
+  }, []);
 
   const refreshDatasets = useCallback(async () => {
     const list = await listDatasets();
@@ -524,9 +545,16 @@ export default function DataAgentApp() {
     const item: ChatItem = { id, question: q, stage: "理解问题中…" };
     setMessages((prev) => [...prev, item]);
     let streamed = "";
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
     const patch = (data: Partial<ChatItem>) =>
       setMessages((prev) => prev.map((m) => m.id === id ? { ...m, ...data } : m));
+
+    // 流式分片很密，按 ~60ms 合并提交，避免每个分片都重渲染整棵应用树
+    const flush = () => {
+      flushTimer = null;
+      patch({ report: streamed });
+    };
 
     try {
       const out = await Agent.analyze({
@@ -535,7 +563,10 @@ export default function DataAgentApp() {
         question: q,
         prefs: settingsState,
         onStage: (stage: string) => patch({ stage }),
-        onDelta: (delta: string) => { streamed += delta; patch({ report: streamed }); },
+        onDelta: (delta: string) => {
+          streamed += delta;
+          if (flushTimer === null) flushTimer = setTimeout(flush, 60);
+        },
         onRestart: () => { streamed = ""; patch({ report: "" }); },
         onResult: (plan: any, payload: any, kind: string) => {
           if (kind === "clean") patch({ plan, clean: payload, task: "clean" });
@@ -563,11 +594,25 @@ export default function DataAgentApp() {
         setHistory(await listHistory(target.id));
       }
     } catch (e) {
+      if (streamed) patch({ report: streamed });
       patch({ stage: "失败", error: Cloud.errText(e) });
-    } finally { setBusy(false); }
+    } finally {
+      if (flushTimer !== null) clearTimeout(flushTimer);
+      setBusy(false);
+    }
   };
 
-  const applyClean = async (item: ChatItem) => {
+  const sidebarProps = useMemo(() => ({
+    datasets,
+    currentId: current?.id ?? null,
+    history,
+    onSelect: selectDataset,
+    onCreate: openImport,
+    onOpenSettings: openSettings,
+    onHistory: loadHistoryItem,
+  }), [datasets, current?.id, history, selectDataset, openImport, openSettings, loadHistoryItem]);
+
+  const applyClean = useCallback(async (item: ChatItem) => {
     if (!item.clean || !current) return;
     const created = await Cloud.db.importDataset({
       name: `${current.name}（已清洗）`.slice(0,60),
@@ -579,7 +624,7 @@ export default function DataAgentApp() {
       const meta = list.find((d) => d.id === created[0].id) || created[0];
       await selectDataset(meta);
     }
-  };
+  }, [current, refreshDatasets, selectDataset]);
 
   const imported = async (dataset: DatasetMeta) => {
     const list = await refreshDatasets();
@@ -598,55 +643,8 @@ export default function DataAgentApp() {
     await refreshDatasets();
   };
 
-  const loadHistoryItem = (h: AnalysisHistory) => {
-    setMessages((prev) => [...prev, {
-      id: uid(), question: h.question, plan: h.plan,
-      result: h.result, report: h.summary || "", task: "analyze", stage: fmtDate(h.created_at),
-    }]);
-    setView("chat");
-  };
-
   if (booting) return <div className="min-h-screen grid place-items-center muted">正在启动 Data Agent…</div>;
   if (!user) return <AuthView onAuthed={afterAuth}/>;
-
-  const Sidebar = () => (
-    <aside className="surface flex h-full w-72 shrink-0 flex-col border-r">
-      <div className="border-ui flex items-center justify-between border-b p-4">
-        <div className="flex items-center gap-2 font-semibold"><Database size={17} className="brand"/>数据集</div>
-        <button onClick={() => setImportOpen(true)} className="brand-soft brand rounded-lg p-2" title="新建数据集"><Plus size={17}/></button>
-      </div>
-      <div className="pretty-scrollbar flex-1 overflow-auto p-3">
-        {!datasets.length && <p className="muted px-2 py-8 text-center text-sm">还没有数据集</p>}
-        <div className="space-y-1">
-          {datasets.map((d) => (
-            <button key={d.id} onClick={() => void selectDataset(d)}
-              className={`w-full rounded-xl px-3 py-3 text-left transition ${current?.id === d.id ? "brand-soft" : "hover:surface-2"}`}>
-              <p className="truncate text-sm font-medium">{d.name}</p>
-              <p className="muted mt-1 text-xs">{d.row_count.toLocaleString()} 行 · {d.columns?.length || 0} 字段</p>
-            </button>
-          ))}
-        </div>
-
-        {current && (
-          <div className="mt-6">
-            <p className="muted mb-2 px-2 text-xs font-medium uppercase tracking-wider">分析历史</p>
-            <div className="space-y-1">
-              {history.map((h) => <button key={h.id} onClick={() => loadHistoryItem(h)}
-                className="w-full rounded-lg px-2 py-2 text-left hover:surface-2">
-                <p className="truncate text-xs">{h.question}</p>
-                <p className="muted mt-1 text-[11px]">{fmtDate(h.created_at)}</p>
-              </button>)}
-            </div>
-          </div>
-        )}
-      </div>
-      <div className="border-ui border-t p-3">
-        <button onClick={() => setSettingsOpen(true)} className="muted flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm hover:surface-2">
-          <Settings size={16}/>设置
-        </button>
-      </div>
-    </aside>
-  );
 
   return (
     <div className="h-screen overflow-hidden">
@@ -674,9 +672,9 @@ export default function DataAgentApp() {
       </header>
 
       <div className="flex h-[calc(100vh-4rem)]">
-        <div className="desktop-sidebar"><Sidebar/></div>
-        {mobileSidebar && <div className="fixed inset-0 z-40 flex bg-black/35" onClick={() => setMobileSidebar(false)}>
-          <div onClick={(e) => e.stopPropagation()}><Sidebar/></div>
+        <div className="desktop-sidebar"><Sidebar {...sidebarProps}/></div>
+        {mobileSidebar && <div className="fixed inset-0 z-40 flex bg-black/35" onClick={closeMobileSidebar}>
+          <div onClick={(e) => e.stopPropagation()}><Sidebar {...sidebarProps}/></div>
         </div>}
 
         <main className="min-w-0 flex-1">
