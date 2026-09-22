@@ -224,11 +224,16 @@ export async function resolveRequestedModel(requested: string) {
   const [providers, routing] = await Promise.all([resolveLlmProviders(), resolveRouting()]);
   const channels = providers
     .filter((provider) => provider.enabled)
-    .flatMap((provider) =>
-      provider.models
+    .flatMap((provider) => {
+      const configured = provider.models
         .filter((model) => model.enabled && model.publicModel === requested)
-        .map((model) => ({ provider, model: model.upstreamModel }))
-    );
+        .map((model) => ({ provider, model: model.upstreamModel }));
+      if (configured.length) return configured;
+      if (provider.source === "environment" && provider.models.length === 0) {
+        return [{ provider, model: requested }];
+      }
+      return [];
+    });
 
   if (!channels.length) {
     throw new ApiError(400, "llm_model_invalid", "模型不存在或没有可用渠道");
@@ -248,6 +253,13 @@ export async function listPublicModels() {
   const names = new Set<string>();
 
   for (const provider of providers) {
+    if (provider.models.length === 0 && provider.source === "environment") {
+      try {
+        const discovered = await discoverLlmModels(provider.id);
+        for (const model of discovered.models) names.add(model);
+      } catch {}
+      continue;
+    }
     for (const model of provider.models) {
       if (model.enabled) names.add(model.publicModel);
     }
