@@ -425,13 +425,13 @@ YAML
 verify_database_connectivity() {
   if [[ "$DB_MODE" == "local" ]]; then
     log "starting managed PostgreSQL..."
-    docker compose up -d --wait postgres
+    deployment_compose up -d --wait postgres
     return
   fi
 
   if [[ "$DB_MODE" == "host" && "$DB_PROXY_REQUIRED" -eq 1 ]]; then
     log "starting safe host-PostgreSQL Docker gateway proxy..."
-    docker compose up -d db-proxy
+    deployment_compose up -d db-proxy
   fi
 
   local -a args=()
