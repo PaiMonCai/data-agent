@@ -472,7 +472,6 @@ $DB_NETWORKS_BLOCK
       retries: 12
       start_period: 30s
 
-volumes:
 $DATABASE_VOLUME_BLOCK
 $DB_NETWORK_DECL_BLOCK
 EOF
