@@ -1,4 +1,4 @@
-import { Parse } from "./parse.ts";
+import { Parse, isoDate } from "./parse.ts";
 import { Engine } from "./engine.ts";
 import type { CleanResult, CleanStep, CleanStepReport, ColumnMeta, DataRow } from "./types";
 
@@ -344,7 +344,7 @@ const Clean = (function () {
           if (v === null) { fail++; r[col] = ''; } else r[col] = v;
         } else if (type === 'date') {
           const d = D(raw);
-          if (!d) { fail++; r[col] = ''; } else r[col] = d.toISOString().slice(0, 10);
+          if (!d) { fail++; r[col] = ''; } else r[col] = isoDate(d);
         } else if (type === 'text') {
           r[col] = String(raw);
         }
