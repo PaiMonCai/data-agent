@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import nodemailer from "nodemailer";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
@@ -35,6 +35,9 @@ export const env = {
   port: intEnv("PORT", 3000),
   databaseUrl: required("DATABASE_URL"),
   sessionSecret,
+  systemConfigEncryptionKey: process.env.SYSTEM_CONFIG_ENCRYPTION_KEY || sessionSecret,
+  bootstrapAdminEmail: process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase() || "",
+  bootstrapAdminPassword: process.env.BOOTSTRAP_ADMIN_PASSWORD || "",
   sessionDays: intEnv("SESSION_DAYS", 30),
   cookieName: process.env.SESSION_COOKIE_NAME || "data_agent_session",
   cookieSecure: boolEnv("COOKIE_SECURE", nodeEnv === "production"),
@@ -70,6 +73,7 @@ export const prisma = new PrismaClient({ adapter });
 export type PublicUser = {
   id: string;
   email: string;
+  role: string;
 };
 
 export type AppEnv = {
@@ -93,8 +97,8 @@ export function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
 }
 
-export function publicUser(user: { id: string; email: string }): PublicUser {
-  return { id: user.id, email: user.email };
+export function publicUser(user: { id: string; email: string; role: string }): PublicUser {
+  return { id: user.id, email: user.email, role: user.role };
 }
 
 function hmac(value: string) {
@@ -193,35 +197,186 @@ export const authRequired = createMiddleware<AppEnv>(async (c, next) => {
 });
 
 let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
+let transporterKey = "";
 
-function mailer() {
-  if (transporter) return transporter;
-  if (!env.smtpHost) {
-    throw new ApiError(503, "mail_not_configured", "邮件服务尚未配置");
+function systemSecretKey() {
+  return createHash("sha256").update(env.systemConfigEncryptionKey).digest();
+}
+
+export function encryptSystemSecret(value: string) {
+  if (!value) return "";
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", systemSecretKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `v1.${iv.toString("base64url")}.${tag.toString("base64url")}.${encrypted.toString("base64url")}`;
+}
+
+export function decryptSystemSecret(value: string) {
+  if (!value || !value.startsWith("v1.")) return value || "";
+  const [, ivRaw, tagRaw, dataRaw] = value.split(".");
+  try {
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      systemSecretKey(),
+      Buffer.from(ivRaw, "base64url")
+    );
+    decipher.setAuthTag(Buffer.from(tagRaw, "base64url"));
+    return Buffer.concat([
+      decipher.update(Buffer.from(dataRaw, "base64url")),
+      decipher.final(),
+    ]).toString("utf8");
+  } catch {
+    throw new ApiError(500, "mail_secret_invalid", "邮件密码无法解密，请在管理设置中重新保存 SMTP 密码");
   }
-  transporter = nodemailer.createTransport({
+}
+
+export type MailConfig = {
+  mode: string;
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  from: string;
+  source: "database" | "environment";
+};
+
+export async function resolveMailConfig(): Promise<MailConfig> {
+  const stored = await prisma.systemSetting.findUnique({ where: { key: "smtp" } });
+  const value = (stored?.value || {}) as Record<string, unknown>;
+  const host = String(value.host || "").trim();
+
+  if (host) {
+    return {
+      mode: "smtp",
+      host,
+      port: Number(value.port) || 587,
+      secure: Boolean(value.secure),
+      user: String(value.user || ""),
+      pass: decryptSystemSecret(String(value.password || "")),
+      from: String(value.from || "") || "Data Agent <no-reply@example.com>",
+      source: "database",
+    };
+  }
+
+  return {
+    mode: env.mailMode,
     host: env.smtpHost,
     port: env.smtpPort,
     secure: env.smtpSecure,
-    auth: env.smtpUser ? { user: env.smtpUser, pass: env.smtpPass } : undefined,
+    user: env.smtpUser,
+    pass: env.smtpPass,
+    from: env.smtpFrom,
+    source: "environment",
+  };
+}
+
+export async function publicMailSettings() {
+  const cfg = await resolveMailConfig();
+  return {
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    user: cfg.user,
+    from: cfg.from,
+    configured: cfg.mode === "smtp" && Boolean(cfg.host),
+    hasPassword: Boolean(cfg.pass),
+    source: cfg.source,
+  };
+}
+
+export async function saveMailSettings(input: {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  password?: string;
+  from: string;
+}) {
+  const previous = await prisma.systemSetting.findUnique({ where: { key: "smtp" } });
+  const old = (previous?.value || {}) as Record<string, unknown>;
+  const password =
+    input.password === undefined || input.password === ""
+      ? String(old.password || "")
+      : encryptSystemSecret(input.password);
+
+  await prisma.systemSetting.upsert({
+    where: { key: "smtp" },
+    create: {
+      key: "smtp",
+      value: {
+        host: input.host,
+        port: input.port,
+        secure: input.secure,
+        user: input.user,
+        password,
+        from: input.from,
+      },
+    },
+    update: {
+      value: {
+        host: input.host,
+        port: input.port,
+        secure: input.secure,
+        user: input.user,
+        password,
+        from: input.from,
+      },
+    },
   });
+
+  transporter = null;
+  transporterKey = "";
+  return publicMailSettings();
+}
+
+async function mailer(cfg: MailConfig) {
+  if (cfg.mode !== "smtp" || !cfg.host) {
+    throw new ApiError(503, "mail_not_configured", "邮件服务尚未配置");
+  }
+  const key = createHash("sha256")
+    .update(JSON.stringify([cfg.host, cfg.port, cfg.secure, cfg.user, cfg.pass]))
+    .digest("hex");
+  if (transporter && transporterKey === key) return transporter;
+
+  transporter = nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    auth: cfg.user ? { user: cfg.user, pass: cfg.pass } : undefined,
+  });
+  transporterKey = key;
   return transporter;
+}
+
+export async function sendTestMail(email: string) {
+  const cfg = await resolveMailConfig();
+  const transport = await mailer(cfg);
+  await transport.sendMail({
+    from: cfg.from,
+    to: email,
+    subject: "Data Agent SMTP 测试",
+    text: "SMTP 配置测试成功。Data Agent 已可以发送登录与注册验证码。",
+  });
 }
 
 export async function sendOtpMail(email: string, code: string, purpose: string) {
   const purposeText =
     purpose === "reset" ? "重置密码" : purpose === "signup" ? "注册账号" : "登录";
+  const cfg = await resolveMailConfig();
 
-  if (env.mailMode === "console") {
+  if (cfg.mode === "console") {
     console.log(`[OTP] ${email} ${purposeText}: ${code}`);
     return;
   }
-  if (env.mailMode !== "smtp") {
+  if (cfg.mode !== "smtp") {
     throw new ApiError(500, "mail_mode_invalid", "MAIL_MODE 配置无效");
   }
 
-  await mailer().sendMail({
-    from: env.smtpFrom,
+  const transport = await mailer(cfg);
+  await transport.sendMail({
+    from: cfg.from,
     to: email,
     subject: `Data Agent ${purposeText}验证码`,
     text: `你的验证码是 ${code}，${env.otpTtlMinutes} 分钟内有效。如果不是你本人操作，请忽略此邮件。`,
