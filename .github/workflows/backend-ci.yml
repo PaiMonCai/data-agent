@@ -54,6 +54,11 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+      - name: Validate frontend static export
+        working-directory: frontend
+        run: |
+          test -f out/index.html
+          test -d out/_next
 
       - run: npm install
       - run: npm run validate

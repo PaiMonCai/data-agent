@@ -10,7 +10,9 @@
 - OpenAI-compatible LLM 反向代理
 - Docker Compose
 
-前端和后端可以由同一个容器提供，因此默认无需 CORS，浏览器只访问同源 `/api`。
+前端使用 Next.js + React + TypeScript + Tailwind CSS，并通过 Next.js static export 构建到静态目录。Docker 镜像把该目录复制给 Hono 提供，因此前端和后端仍由同一个容器提供，默认无需 CORS，浏览器只访问同源 `/api`。
+
+前端开发与架构说明见 `FRONTEND.md`。
 
 ## 1. 环境变量
 
