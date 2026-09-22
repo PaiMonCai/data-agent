@@ -15,9 +15,8 @@ services:
       retries: 20
 
   app:
-    build:
-      context: .
-      dockerfile: server/Dockerfile
+    image: ${DATA_AGENT_IMAGE:-ghcr.io/paimoncai/data-agent:latest}
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       postgres:
