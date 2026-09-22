@@ -40,6 +40,8 @@ jobs:
       LLM_API_KEY: ci-key
       LLM_REQUESTS_PER_MINUTE: "1"
       LLM_REQUESTS_PER_DAY: "10"
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
