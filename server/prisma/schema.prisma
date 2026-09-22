@@ -11,6 +11,7 @@ model User {
   id            String       @id @default(cuid())
   email         String       @unique
   password_hash String?
+  role          String       @default("user")
   created_at    DateTime     @default(now())
   updated_at    DateTime     @default(now()) @updatedAt
   sessions      Session[]
@@ -113,4 +114,13 @@ model LlmRateBucket {
   @@unique([user_id, bucket_kind, bucket_start])
   @@index([bucket_start])
   @@map("llm_rate_buckets")
+}
+
+
+model SystemSetting {
+  key        String   @id
+  value      Json
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@map("system_settings")
 }

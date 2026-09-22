@@ -30,6 +30,7 @@ export interface Dataset extends DatasetMeta {
 export interface User {
   id: string;
   email: string;
+  role: "admin" | "user" | string;
 }
 
 export interface ModelInfo {
