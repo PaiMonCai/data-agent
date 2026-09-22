@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
 import { parseMarkdown, type BlockNode, type InlineNode } from "@/lib/markdown";
 
 function renderInline(nodes: InlineNode[], keyPrefix = ""): ReactNode[] {
@@ -101,6 +101,7 @@ function renderBlock(node: BlockNode, key: string): ReactNode {
 }
 
 export default function MarkdownView({ content }: { content: string }) {
-  const blocks = parseMarkdown(content);
+  // content 不变时（切主题、父组件重渲染）不必重新解析整篇
+  const blocks = useMemo(() => parseMarkdown(content), [content]);
   return <div className="text-sm leading-7">{blocks.map((node, i) => renderBlock(node, `b${i}`))}</div>;
 }

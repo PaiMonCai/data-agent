@@ -124,11 +124,11 @@ export function parseMarkdown(source: string): BlockNode[] {
       continue;
     }
 
-    const heading = /^(#{2,4})\s+(.*)$/.exec(trimmed);
+    const heading = /^(#{1,4})\s+(.*)$/.exec(trimmed);
     if (heading) {
       blocks.push({
         type: "heading",
-        level: heading[1].length as 2 | 3 | 4,
+        level: Math.max(2, Math.min(heading[1].length, 4)) as 2 | 3 | 4,
         children: parseInline(heading[2]),
       });
       index += 1;
@@ -185,15 +185,17 @@ export function parseMarkdown(source: string): BlockNode[] {
     while (index < lines.length) {
       const current = lines[index];
       const currentTrimmed = current.trim();
+      // 只有下一行确实是分隔行时才算表格开头；否则按普通段落收下，避免内容被整行丢弃
+      const startsTable = isTableRow(current) && index + 1 < lines.length && isTableDivider(lines[index + 1]);
       if (
         !currentTrimmed ||
-        /^#{2,4}\s/.test(currentTrimmed) ||
+        /^#{1,4}\s/.test(currentTrimmed) ||
         /^```/.test(currentTrimmed) ||
         /^[-*+]\s+/.test(currentTrimmed) ||
         /^\d+[.)]\s+/.test(currentTrimmed) ||
         /^>\s?/.test(currentTrimmed) ||
         /^(-{3,}|\*{3,}|_{3,})$/.test(currentTrimmed) ||
-        isTableRow(current)
+        startsTable
       ) {
         break;
       }
