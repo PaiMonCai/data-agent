@@ -157,7 +157,9 @@ export async function discoverLlmModels(providerId: string) {
   }
 
   const rows = Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : Array.isArray(body?.models) ? body.models : [];
-  const models = [...new Set(rows.map((x: any) => String(x?.id || x?.name || x || "").trim()).filter(Boolean))].slice(0, 200);
+  const models: string[] = [...new Set<string>(
+    rows.map((x: any) => String(x?.id || x?.name || x || "").trim()).filter(Boolean)
+  )].slice(0, 200);
   return { models };
 }
 
