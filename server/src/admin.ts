@@ -12,6 +12,11 @@ import {
   sendTestMail,
   type AppEnv,
 } from "./lib.js";
+import {
+  discoverLlmModels,
+  publicLlmSettings,
+  saveLlmSettings,
+} from "./llm-config.js";
 
 const router = new Hono<AppEnv>();
 
@@ -33,6 +38,19 @@ const mailSchema = z.object({
   user: z.string().trim().max(255),
   password: z.string().max(1024).optional(),
   from: z.string().trim().min(1).max(320),
+});
+
+const llmProviderSchema = z.object({
+  id: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
+  name: z.string().trim().min(1).max(100),
+  baseUrl: z.string().trim().url().max(500),
+  apiKey: z.string().max(4096).optional(),
+  models: z.array(z.string().trim().min(1).max(200)).max(200),
+  enabled: z.boolean(),
+});
+
+const llmSchema = z.object({
+  providers: z.array(llmProviderSchema).max(20),
 });
 
 router.get("/settings/mail", async (c) => {
@@ -64,6 +82,38 @@ router.post("/settings/mail/test", async (c) => {
     }
     await sendTestMail(email);
     return c.json({ ok: true });
+  } catch (e) {
+    return jsonError(c, e);
+  }
+});
+
+router.get("/settings/llm", async (c) => {
+  try {
+    return c.json(await publicLlmSettings());
+  } catch (e) {
+    return jsonError(c, e);
+  }
+});
+
+router.patch("/settings/llm", async (c) => {
+  try {
+    const parsed = llmSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      throw new ApiError(400, "request_invalid", "LLM 供应商配置格式不正确");
+    }
+    const ids = parsed.data.providers.map((x) => x.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new ApiError(400, "request_invalid", "LLM 供应商 ID 不能重复");
+    }
+    return c.json(await saveLlmSettings(parsed.data));
+  } catch (e) {
+    return jsonError(c, e);
+  }
+});
+
+router.post("/settings/llm/providers/:id/discover", async (c) => {
+  try {
+    return c.json(await discoverLlmModels(c.req.param("id")));
   } catch (e) {
     return jsonError(c, e);
   }
