@@ -23,7 +23,7 @@ frontend/
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -138,3 +138,16 @@ Next.js / React / TypeScript
 旧的根目录 `index.html` 和 `assets/*.js` 已从当前代码树删除。
 
 需要回看或回滚时直接通过 Git 历史访问，不再在主分支同时维护两套前端。
+
+
+## 依赖锁定
+
+前端提交 `package-lock.json`，CI 和 Docker build 使用 `npm ci`，避免每次构建解析出不同依赖树。
+
+CI 还会执行：
+
+```bash
+npm audit --audit-level=high
+```
+
+当前前端审计结果为 0 vulnerability。

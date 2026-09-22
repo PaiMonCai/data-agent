@@ -269,7 +269,7 @@ data-agent-postgres
 ```bash
 cd server
 cp .env.example .env
-npm install
+npm ci
 npm run migrate:dev
 npm run dev
 ```
@@ -302,3 +302,38 @@ Docker image build
 ```
 
 完整浏览器端接口约定见 `SELF_HOSTED_API.md`。
+
+
+## 12. 依赖锁定与安全审计
+
+前端和后端都提交 `package-lock.json`。CI、Docker build 和本地可复现安装统一使用：
+
+```bash
+npm ci
+```
+
+GitHub Actions 会分别执行：
+
+```bash
+cd frontend && npm audit --audit-level=high
+cd server && npm audit --audit-level=high
+```
+
+当前 Prisma 7.10.0 的 CLI 依赖链会把旧版 `deepmerge-ts` 和 `mysql2` 带入安装树。项目在 `server/package.json` 中暂时固定以下安全 override：
+
+```json
+{
+  "overrides": {
+    "deepmerge-ts": "8.0.2",
+    "mysql2": "3.24.4"
+  }
+}
+```
+
+原因：
+
+- `deepmerge-ts < 8.0.0` 受 GHSA-ggr8-5vv4-36mx 影响；
+- `mysql2 <= 3.23.0` 受 GHSA-rgwj-5xj2-c3m3 影响，并且更早版本还受认证降级相关漏洞影响；
+- `npm audit fix --force` 会建议把 Prisma 7 降到 Prisma 6，这不是可接受的生产修复路径。
+
+这些 override 已通过 Prisma validate、generate、TypeScript build、PostgreSQL migration 和运行时 smoke test 验证。等 Prisma 7 后续版本或 Prisma 8 stable 自己升级这些依赖后，应优先删除 override，再重新运行完整 CI。

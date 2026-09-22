@@ -1,8 +1,8 @@
 FROM node:22-alpine AS frontend-build
 WORKDIR /app/frontend
 
-COPY frontend/package.json ./
-RUN npm install
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
 
 COPY frontend ./
 RUN npm run build
@@ -10,8 +10,8 @@ RUN npm run build
 FROM node:22-alpine AS server-build
 WORKDIR /app/server
 
-COPY server/package.json ./
-RUN npm install
+COPY server/package.json server/package-lock.json ./
+RUN npm ci
 
 COPY server/prisma ./prisma
 COPY server/prisma.config.ts ./
@@ -30,10 +30,10 @@ ENV PORT=3000
 ENV SERVE_STATIC=true
 ENV STATIC_ROOT=./public
 
-COPY server/package.json ./
+COPY server/package.json server/package-lock.json ./
 COPY server/prisma ./prisma
 COPY server/prisma.config.ts ./
-RUN npm install --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=server-build /app/server/dist ./dist
 COPY --from=frontend-build /app/frontend/out ./public

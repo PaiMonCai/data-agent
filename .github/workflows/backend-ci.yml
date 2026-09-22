@@ -47,7 +47,10 @@ jobs:
           node-version: 22
       - name: Install frontend dependencies
         working-directory: frontend
-        run: npm install
+        run: npm ci
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
       - name: Typecheck frontend
         working-directory: frontend
         run: npm run typecheck
@@ -60,7 +63,10 @@ jobs:
           test -f out/index.html
           test -d out/_next
 
-      - run: npm install
+      - name: Install server dependencies
+        run: npm ci
+      - name: Audit server dependencies
+        run: npm audit --audit-level=high
       - run: npm run validate
       - run: npm run generate
       - run: npm run typecheck
