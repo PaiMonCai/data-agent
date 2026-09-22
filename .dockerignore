@@ -8,6 +8,9 @@
 **/*.log
 
 # 镜像内会重新 install / generate / 编译
+# Next.js 的 .next 与 out 由镜像内的 next build 重新生成
 **/node_modules
 **/dist
+**/.next
+**/out
 server/src/generated
