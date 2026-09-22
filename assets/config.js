@@ -7,7 +7,6 @@ window.PUBLIC_CONFIG = {
 
 window.APP_LIMITS = {
   maxRows: 20000,      // 单数据集最大行数
-  insertChunk: 400,    // 批量写入分块大小
   previewRows: 100,    // 预览表展示行数
   sampleToLLM: 8,      // 送给模型的样例行数
 };
