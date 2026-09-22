@@ -30,7 +30,7 @@ export default function SettingsDialog({ settings, onChange, models, onClose }: 
           <SettingSelect label="主题" value={settings.theme} onChange={(v) => set("theme", v as AppSettings["theme"])}
             options={[["system","跟随系统"],["light","浅色"],["dark","深色"]]}/>
           <SettingSelect label="默认模型" value={settings.model} onChange={(v) => set("model", v)}
-            options={[["","自动选择"], ...models.map((m) => [m.id, m.name || m.id] as [string,string])]}/>
+            options={[["","自动选择"], ...models.map((m) => [m.id, m.provider ? `${m.provider} · ${m.name || m.id}` : (m.name || m.id)] as [string,string])]}/>
           <SettingSelect label="默认聚合" value={settings.agg} onChange={(v) => set("agg", v as AppSettings["agg"])}
             options={[["sum","求和"],["avg","平均值"],["count","计数"],["max","最大值"],["min","最小值"]]}/>
           <SettingSelect label="时间粒度" value={settings.granularity} onChange={(v) => set("granularity", v as AppSettings["granularity"])}
