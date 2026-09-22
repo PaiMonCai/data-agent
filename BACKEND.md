@@ -150,7 +150,20 @@ LLM_MODELS=gpt-5.6,gpt-5.6-mini,glm-4.6
 
 这只影响模型列表，不限制前端自定义模型 ID。
 
-## 6. 数据隔离
+建议在公开部署时按成本调整额度：
+
+```env
+LLM_REQUESTS_PER_MINUTE=10
+LLM_REQUESTS_PER_DAY=300
+LLM_MAX_INPUT_CHARS=200000
+LLM_TIMEOUT_MS=180000
+```
+
+限流使用 PostgreSQL 原子计数桶，因此多实例部署时仍共享同一额度，不依赖单机内存。旧的分钟桶会被后台轻量清理。
+
+## 6. 数据隔离与导入事务
+
+前端导入数据走 `POST /api/data/import`。服务端会在一个 PostgreSQL transaction 中创建数据集并分块写入数据行；任何一批失败都会整体回滚。
 
 后端不会接受前端提供的 `user_id`。
 
@@ -190,6 +203,7 @@ OTP：
 - `datasets`
 - `dataset_rows`
 - `analyses`
+- `llm_rate_buckets`
 
 数据库数据位于 Docker volume：
 
@@ -225,6 +239,9 @@ GitHub Actions 会执行：
 prisma validate
 prisma generate
 tsc --noEmit
+prisma migrate deploy
+runtime smoke test
+Docker image build
 ```
 
 对应文件：
