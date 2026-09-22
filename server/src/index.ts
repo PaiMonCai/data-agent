@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import authRoutes from "./auth.js";
+import adminRoutes, { ensureBootstrapAdmin, setupStatus } from "./admin.js";
 import dataRoutes from "./data.js";
 import llmRoutes from "./llm.js";
 import { env, jsonError, prisma, type AppEnv } from "./lib.js";
@@ -75,7 +76,16 @@ app.get("/api/health", async (c) => {
   }
 });
 
+app.get("/api/setup/status", async (c) => {
+  try {
+    return c.json(await setupStatus());
+  } catch (e) {
+    return jsonError(c, e);
+  }
+});
+
 app.route("/api/auth", authRoutes);
+app.route("/api/admin", adminRoutes);
 app.route("/api/data", dataRoutes);
 app.route("/api/llm", llmRoutes);
 
@@ -96,6 +106,8 @@ app.notFound((c) => {
 });
 
 app.onError((err, c) => jsonError(c, err));
+
+await ensureBootstrapAdmin();
 
 const server = serve(
   {
