@@ -64,6 +64,7 @@ jobs:
         working-directory: frontend
         run: |
           test -f out/index.html
+          test -f out/admin/index.html
           test -d out/_next
 
       - name: Install server dependencies
@@ -119,6 +120,29 @@ jobs:
 
           curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/auth/session > /tmp/session-auth.json
           grep -q 'ci@example.com' /tmp/session-auth.json
+
+          curl -fsS \
+            -c /tmp/admin-cookies.txt \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@example.com","password":"ci-admin-password"}' \
+            http://127.0.0.1:3000/api/auth/password > /tmp/admin-login.json
+          grep -q '"role":"admin"' /tmp/admin-login.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-before.json
+          grep -q '"source":"environment"' /tmp/admin-llm-before.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            -X PATCH \
+            -H 'Content-Type: application/json' \
+            -d '{"providers":[{"id":"ci","name":"CI Provider","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-runtime-key","models":["mock-model"],"enabled":true}]}' \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-after.json
+          grep -q '"source":"database"' /tmp/admin-llm-after.json
+          grep -q '"hasApiKey":true' /tmp/admin-llm-after.json
+          ! grep -q 'ci-runtime-key' /tmp/admin-llm-after.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/runtime-models.json
+          grep -q 'ci::mock-model' /tmp/runtime-models.json
 
           curl -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"name":"CI Dataset","source":"sample","columns":[{"name":"x","type":"number"}],"rows":[{"x":1},{"x":2}]}'             http://127.0.0.1:3000/api/data/import > /tmp/dataset-create.json
           grep -q 'CI Dataset' /tmp/dataset-create.json
