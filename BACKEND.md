@@ -14,10 +14,24 @@
 
 ## 1. 环境变量
 
-Docker Compose 从仓库根目录的 `.env` 读取部署变量。先复制模板：
+Docker Compose 从仓库根目录的 `.env` 读取部署变量。服务器部署只需要 `docker-compose.yml` 和 `.env`，应用镜像由 GHCR 提供，不需要在服务器上保留源码或执行 Docker build。
+
+先复制模板：
 
 ```bash
 cp .env.example .env
+```
+
+默认镜像：
+
+```env
+DATA_AGENT_IMAGE=ghcr.io/paimoncai/data-agent:latest
+```
+
+生产环境更建议固定版本，例如：
+
+```env
+DATA_AGENT_IMAGE=ghcr.io/paimoncai/data-agent:1.2.0
 ```
 
 然后至少填写：
@@ -70,10 +84,45 @@ COOKIE_SECURE=true
 
 直接访问 Node 服务时同域部署可以不设置 `APP_ORIGIN`。如果正式环境前面有 Nginx / OpenResty / Cloudflare 等 HTTPS 反向代理，建议显式设置公开 Origin，例如 `APP_ORIGIN=https://data.example.com`，用于跨站写请求校验。
 
-## 2. 启动
+## 2. 构建镜像 Workflow
+
+仓库中的 `.github/workflows/build-image.yml` 会构建并推送：
+
+```
+ghcr.io/paimoncai/data-agent
+```
+
+镜像同时支持 `linux/amd64` 和 `linux/arm64`。
+
+触发规则：
+
+- push 到 `main`：发布 `latest` 和 `sha-<commit>`
+- push `v*` 标签，例如 `v1.2.0`：发布 Git tag、`1.2.0`、`1.2` 和 commit SHA 标签
+- GitHub Actions 页面可通过 `workflow_dispatch` 手动运行
+
+Workflow 使用仓库自带的 `GITHUB_TOKEN` 写入 GitHub Container Registry，不需要单独配置 Docker Hub 凭据。
+
+如果 GHCR Package 是私有可见性，部署服务器需要先执行 `docker login ghcr.io`；公开 Package 可以直接拉取。
+
+## 3. Compose 部署
+
+首次启动或更新都使用：
 
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
+```
+
+查看容器状态：
+
+```bash
+docker compose ps
+```
+
+查看应用日志：
+
+```bash
+docker compose logs -f app
 ```
 
 应用默认监听：
@@ -90,7 +139,7 @@ prisma migrate deploy
 
 首次启动会自动创建数据库表。
 
-## 3. 健康检查
+## 4. 健康检查
 
 ```bash
 curl http://127.0.0.1:3000/api/health
@@ -108,7 +157,7 @@ curl http://127.0.0.1:3000/api/health
 }
 ```
 
-## 4. OTP 测试
+## 5. OTP 测试
 
 当：
 
@@ -124,7 +173,7 @@ docker compose logs -f app
 
 正式环境不要使用 console 模式。
 
-## 5. LLM 网关
+## 6. LLM 网关
 
 后端兼容 OpenAI 风格：
 
@@ -161,7 +210,7 @@ LLM_TIMEOUT_MS=180000
 
 限流使用 PostgreSQL 原子计数桶，因此多实例部署时仍共享同一额度，不依赖单机内存。旧的分钟桶会被后台轻量清理。
 
-## 6. 数据隔离与导入事务
+## 7. 数据隔离与导入事务
 
 前端导入数据走 `POST /api/data/import`。服务端会在一个 PostgreSQL transaction 中创建数据集并分块写入数据行；任何一批失败都会整体回滚。
 
@@ -169,7 +218,7 @@ LLM_TIMEOUT_MS=180000
 
 `datasets`、`dataset_rows`、`analyses` 的所有读写都会根据当前 HttpOnly Session 在服务端附加用户条件。数据行和分析记录写入前，还会再次检查所属数据集是否属于当前用户。
 
-## 7. 认证设计
+## 8. 认证设计
 
 密码：
 
@@ -193,7 +242,7 @@ OTP：
 - 每小时默认最多 5 次
 - 单验证码最多尝试 5 次
 
-## 8. 数据库
+## 9. 数据库
 
 主要表：
 
@@ -213,7 +262,7 @@ data-agent-postgres
 
 正式部署需要为 PostgreSQL 做独立备份，不要只依赖 Docker volume。
 
-## 9. 开发模式
+## 10. 开发模式
 
 ```bash
 cd server
@@ -231,7 +280,7 @@ SERVE_STATIC=false
 
 前端若运行在另一个 Origin，需要设置 `APP_ORIGIN`。
 
-## 10. CI
+## 11. CI
 
 GitHub Actions 会执行：
 
