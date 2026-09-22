@@ -7,11 +7,6 @@ export interface ParseTextOptions {
 }
 
 /** `Parse.workbook` 的返回值：工作表清单加一个取表函数 */
-/** dta.ts 加完类型之前的过渡契约 */
-interface StataTableReader {
-  read(bytes: Uint8Array): Promise<ParsedTable>;
-}
-
 export interface ParseWorkbook {
   sheets: string[];
   use(sheetName?: string): ParsedTable;
@@ -273,9 +268,7 @@ const Parse = (function () {
   function isStata(fileName: unknown): boolean { return /\.dta$/i.test(String(fileName || '')); }
 
   async function fromStata(bytes: Uint8Array): Promise<ParsedTable> {
-    // dta.ts 还没加类型（仍是 @ts-nocheck），这里只声明 parse 侧关心的最小形状，
-    // 等它的独立 PR 补上类型后就可以直接 import type 而删掉这层断言。
-    const { Dta } = (await import('./dta')) as unknown as { Dta: StataTableReader };
+    const { Dta } = await import('./dta');
     return Dta.read(bytes);
   }
 
