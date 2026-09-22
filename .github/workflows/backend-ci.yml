@@ -137,11 +137,11 @@ jobs:
           curl -fsS -b /tmp/admin-cookies.txt \
             -X PATCH \
             -H 'Content-Type: application/json' \
-            -d '{"providers":[{"id":"ci","name":"CI Provider","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-runtime-key","models":["mock-model"],"enabled":true}]}' \
+            -d '{"providers":[{"id":"ci","name":"CI Provider","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model"],"enabled":true}]}' \
             http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-after.json
           grep -q '"source":"database"' /tmp/admin-llm-after.json
           grep -q '"hasApiKey":true' /tmp/admin-llm-after.json
-          ! grep -q 'ci-runtime-key' /tmp/admin-llm-after.json
+          ! grep -q 'ci-key' /tmp/admin-llm-after.json
 
           curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/runtime-models.json
           grep -q 'ci::mock-model' /tmp/runtime-models.json
