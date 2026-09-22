@@ -40,24 +40,33 @@ const mailSchema = z.object({
   from: z.string().trim().min(1).max(320),
 });
 
-const llmModelChannelSchema = z.object({
-  publicModel: z.string().trim().min(1).max(200),
-  upstreamModel: z.string().trim().min(1).max(200),
-  enabled: z.boolean(),
-});
-
 const llmProviderSchema = z.object({
   id: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
   name: z.string().trim().min(1).max(100),
   baseUrl: z.string().trim().url().max(500),
   apiKey: z.string().max(4096).optional(),
-  models: z.array(llmModelChannelSchema).max(500),
+  models: z.array(z.string().trim().min(1).max(200)).max(500),
   enabled: z.boolean(),
+});
+
+const llmChannelSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  providerId: z.string().trim().min(1).max(64),
+  upstreamModel: z.string().trim().min(1).max(200),
+  enabled: z.boolean(),
+});
+
+const llmLogicalModelSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  name: z.string().trim().min(1).max(200),
+  enabled: z.boolean(),
+  strategy: z.literal("round_robin"),
+  channels: z.array(llmChannelSchema).max(100),
 });
 
 const llmSchema = z.object({
   providers: z.array(llmProviderSchema).max(20),
-  routing: z.record(z.string(), z.enum(["round_robin", "priority"])).optional(),
+  models: z.array(llmLogicalModelSchema).max(200),
 });
 
 router.get("/settings/mail", async (c) => {
