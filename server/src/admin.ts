@@ -108,10 +108,28 @@ router.patch("/settings/llm", async (c) => {
     if (!parsed.success) {
       throw new ApiError(400, "request_invalid", "LLM 供应商配置格式不正确");
     }
-    const ids = parsed.data.providers.map((x) => x.id);
-    if (new Set(ids).size !== ids.length) {
+    const providerIds = parsed.data.providers.map((x) => x.id);
+    if (new Set(providerIds).size !== providerIds.length) {
       throw new ApiError(400, "request_invalid", "LLM 供应商 ID 不能重复");
     }
+
+    const modelIds = parsed.data.models.map((x) => x.id);
+    if (new Set(modelIds).size !== modelIds.length) {
+      throw new ApiError(400, "request_invalid", "逻辑模型 ID 不能重复");
+    }
+
+    for (const model of parsed.data.models) {
+      const channelIds = model.channels.map((x) => x.id);
+      if (new Set(channelIds).size !== channelIds.length) {
+        throw new ApiError(400, "request_invalid", `模型 ${model.id} 的渠道 ID 不能重复`);
+      }
+      for (const channel of model.channels) {
+        if (!providerIds.includes(channel.providerId)) {
+          throw new ApiError(400, "request_invalid", `模型 ${model.id} 存在无效供应商渠道`);
+        }
+      }
+    }
+
     return c.json(await saveLlmSettings(parsed.data));
   } catch (e) {
     return jsonError(c, e);
