@@ -98,8 +98,14 @@ export interface AnalysisPlan {
   compareField?: string | null;
   compareValues?: string[];
   periods?: number;
+  /** "最近 N 期 vs 前 N 期" 对比时的另一个写法，与 periods 等价 */
+  comparePeriods?: number;
   limit?: number;
   sort?: "asc" | "desc";
+  /** 异常检测灵敏度，由「设置 → 分析偏好」控制 */
+  sensitivity?: "strict" | "normal" | "loose";
+  /** 该条计划是分析还是清洗；由 agent 填 */
+  task?: "analyze" | "clean";
 }
 
 /** 一条图表序列 */
@@ -129,6 +135,15 @@ export interface AnalysisBaseline {
   lower: number;
 }
 
+export interface AnalysisAnomalyRecord {
+  label: string;
+  value: number;
+  z: number;
+  deviation: number;
+  type: string;
+  index: number;
+}
+
 export interface AnalysisAnomalyPoint {
   label: string;
   dataIndex: number;
@@ -153,6 +168,7 @@ export interface AnalysisResult {
   scatter?: AnalysisScatter | null;
   baseline?: AnalysisBaseline | null;
   anomalyPoints?: AnalysisAnomalyPoint[];
+  anomalies?: AnalysisAnomalyRecord[];
   filters?: AnalysisFilter[];
   rowCount?: number;
   stats?: Record<string, unknown>;
