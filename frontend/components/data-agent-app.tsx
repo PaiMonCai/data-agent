@@ -198,7 +198,7 @@ export default function DataAgentApp() {
             <label className="sr-only" htmlFor="model-select">选择模型</label>
             <select id="model-select" value={model} onChange={(e) => setModel(e.target.value)} className="bg-transparent text-sm outline-none">
               {!models.length && <option value="">未配置模型</option>}
-              {models.map((m) => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}
+              {models.map((m) => <option key={m.id} value={m.id}>{m.provider ? `${m.provider} · ${m.name || m.id}` : (m.name || m.id)}</option>)}
             </select>
             <ChevronDown size={13} className="muted"/>
           </div>
