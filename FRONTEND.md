@@ -8,7 +8,7 @@ Data Agent 已从 `index.html + Vanilla JavaScript` 迁移到：
 - Tailwind CSS 4
 - Apache ECharts
 - Lucide React
-- ExcelJS
+- SheetJS Community Edition 0.20.3
 
 源码位于：
 
@@ -85,12 +85,13 @@ Next.js / React / TypeScript
 
 - CSV / TSV / 文本
 - JSON
-- Excel `.xlsx` / `.xlsm`
+- Excel `.xlsx` / `.xlsm` / `.xls` / `.xlsb`
+- OpenDocument `.ods`
 - Stata `.dta`
 - 直接粘贴表格
 - 内置示例数据
 
-旧式 Excel `.xls` 和 `.ods` 不再直接解析。建议先使用 Excel / LibreOffice / WPS 转换成 `.xlsx` 后再上传。这样可以避免继续依赖 npm 上已经停止更新的旧 SheetJS `xlsx` 包。
+表格解析使用 SheetJS Community Edition 0.20.3。由于 npm registry 中名为 `xlsx` 的版本停留在较旧的 0.18.5，项目按照 SheetJS 官方安装方式直接固定到其 0.20.3 发布 tarball。
 
 ## 模块
 
@@ -104,7 +105,7 @@ Next.js / React / TypeScript
 `lib/parse.ts`
 
 - CSV / TSV / JSON
-- ExcelJS
+- SheetJS 0.20.3
 - 数据类型推断
 
 `lib/dta.ts`
