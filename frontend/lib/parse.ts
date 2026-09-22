@@ -1,5 +1,5 @@
 // @ts-nocheck
-import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 
 /* 数据解析：分隔文本 / JSON -> { headers, rows, columns } */
 const Parse = (function () {
@@ -176,63 +176,30 @@ const Parse = (function () {
   }
 
   /* ---------- Excel / WPS 表格 ---------- */
-  // ExcelJS only handles modern OOXML workbooks here. Legacy .xls/.ods should
-  // be converted to .xlsx before upload instead of relying on an outdated parser.
-  const XLSX_EXT = /\.(xlsx|xlsm)$/i;
+  const XLSX_EXT = /\.(xlsx|xlsm|xls|xlsb|ods)$/i;
 
   function isExcel(fileName) { return XLSX_EXT.test(String(fileName || '')); }
 
-  function excelValue(value) {
-    if (value === null || value === undefined) return '';
-    if (value instanceof Date) return value.toISOString();
-    if (typeof value !== 'object') return value;
-
-    if (Array.isArray(value.richText)) {
-      return value.richText.map((part) => part && part.text ? part.text : '').join('');
-    }
-    if (Object.prototype.hasOwnProperty.call(value, 'result')) {
-      return excelValue(value.result);
-    }
-    if (Object.prototype.hasOwnProperty.call(value, 'text')) {
-      return String(value.text || '');
-    }
-    try { return JSON.stringify(value); } catch { return String(value); }
-  }
-
-  async function workbook(arrayBuffer) {
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(arrayBuffer);
-    if (!wb.worksheets.length) throw new Error('这个文件里没有工作表');
-
+  function workbook(arrayBuffer) {
+    const wb = XLSX.read(arrayBuffer, { type: 'array' });
+    if (!wb.SheetNames.length) throw new Error('这个文件里没有工作表');
     return {
-      sheets: wb.worksheets.map((ws) => ws.name),
+      sheets: wb.SheetNames,
       use(sheetName) {
-        const ws = (sheetName && wb.getWorksheet(sheetName)) || wb.worksheets[0];
-        if (!ws) throw new Error('找不到工作表：' + String(sheetName || ''));
-
-        const width = Math.max(1, ws.columnCount);
-        let headers = [];
-        for (let i = 1; i <= width; i++) {
-          const raw = excelValue(ws.getCell(1, i).value);
-          headers.push(String(raw).trim() || ('列' + i));
-        }
-        headers = dedupe(headers);
-
-        const rows = [];
-        ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-          if (rowNumber === 1) return;
-          const out = {};
-          let hasValue = false;
-          headers.forEach((header, i) => {
-            const value = excelValue(row.getCell(i + 1).value);
-            if (value !== '') hasValue = true;
-            out[header] = value;
+        const name = sheetName || wb.SheetNames[0];
+        const ws = wb.Sheets[name];
+        if (!ws) throw new Error('找不到工作表：' + name);
+        const arr = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+        if (!arr.length) throw new Error('工作表「' + name + '」没有数据');
+        const headers = dedupe(Object.keys(arr[0]));
+        return build(headers, arr.map((o) => {
+          const row = {};
+          headers.forEach((h) => {
+            const v = o[h];
+            row[h] = v === null || v === undefined ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
           });
-          if (hasValue) rows.push(out);
-        });
-
-        if (!rows.length) throw new Error('工作表「' + ws.name + '」没有数据');
-        return build(headers, rows);
+          return row;
+        }));
       },
     };
   }
