@@ -366,7 +366,11 @@ YAML
         condition: service_healthy
 YAML
 )"
-    DATABASE_VOLUME_BLOCK="  postgres-data:"
+    DATABASE_VOLUME_BLOCK="$(cat <<'YAML'
+volumes:
+  postgres-data:
+YAML
+)"
   elif [[ "$DB_MODE" == "host" && "$DB_HOST_KIND" == "docker-container" ]]; then
     DB_NETWORKS_BLOCK="$(cat <<'YAML'
     networks:
