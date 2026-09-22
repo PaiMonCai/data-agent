@@ -72,7 +72,7 @@ export interface ParsedTable {
 /** 图表类型，与 agent 计划里的 chart 字段一一对应 */
 export type ChartKind = "line" | "bar" | "pie" | "scatter" | "table";
 
-export type AnalysisAgg = "sum" | "avg" | "count" | "max" | "min";
+export type AnalysisAgg = "sum" | "avg" | "count" | "max" | "min" | "median";
 
 export type AnalysisFilterOp = "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains" | "in";
 
@@ -88,16 +88,16 @@ export type AnalysisFilter = {
 export interface AnalysisPlan {
   title?: string;
   kind?: string;
-  chart?: ChartKind;
+  chart?: ChartKind | null;
   metric?: string | null;
   agg?: AnalysisAgg;
   dimension?: string | null;
   timeField?: string | null;
-  granularity?: Granularity;
+  granularity?: Granularity | null;
   filters?: AnalysisFilter[];
   compareField?: string | null;
   compareValues?: string[];
-  periods?: number;
+  periods?: number | null;
   /** "最近 N 期 vs 前 N 期" 对比时的另一个写法，与 periods 等价 */
   comparePeriods?: number;
   limit?: number;
@@ -105,7 +105,7 @@ export interface AnalysisPlan {
   /** 异常检测灵敏度，由「设置 → 分析偏好」控制 */
   sensitivity?: "strict" | "normal" | "loose";
   /** 该条计划是分析还是清洗；由 agent 填 */
-  task?: "analyze" | "clean";
+  task?: "analyze";
 }
 
 /** 一条图表序列 */
@@ -204,6 +204,13 @@ export interface CleanStep {
 }
 
 
+/** 清洗计划的产物：一个标题加一串按顺序执行的操作，没有任何分析字段 */
+export interface CleanPlan {
+  task: "clean";
+  title: string;
+  ops: CleanStep[];
+}
+
 /** 清洗引擎单步操作的执行结果 */
 export interface CleanStepReport {
   op: string;
@@ -220,7 +227,13 @@ export interface CleanResult {
   report: CleanStepReport[];
 }
 
-/** Agent.analyze 的返回结构。agent.ts 未标注返回类型，这里补一条可辨识联合，供调用侧收窄。 */
+/** 分析计划固定落在 analyze 分支上，用来和 CleanPlan 组成可辨识联合 */
+export type AnalyzePlan = AnalysisPlan & { task: "analyze" };
+
+/** 计划阶段的产物：要么是分析计划，要么是清洗计划，二者互斥 */
+export type AgentPlan = AnalyzePlan | CleanPlan;
+
+/** Agent.analyze 的返回结构。两条分支互斥，调用侧靠 task 收窄 */
 export type AnalysisOutcome =
-  | { task: "clean"; plan: AnalysisPlan | null; clean: CleanResult | null; report: string }
-  | { task: "analyze"; plan: AnalysisPlan | null; result: AnalysisResult | null; report: string };
+  | { task: "clean"; plan: CleanPlan; clean: CleanResult; report: string }
+  | { task: "analyze"; plan: AnalyzePlan; result: AnalysisResult; report: string };
