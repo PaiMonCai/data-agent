@@ -200,7 +200,7 @@ function ImportDialog({ onClose, onImported }: {
     try {
       let out: ParsedTable;
       if (Parse.isExcel(file.name)) {
-        const wb = Parse.workbook(await file.arrayBuffer());
+        const wb = await Parse.workbook(await file.arrayBuffer());
         out = wb.use(wb.sheets[0]);
         setNote(`已读取工作表：${wb.sheets[0]}`);
       } else if (Parse.isStata(file.name)) {
@@ -243,7 +243,7 @@ function ImportDialog({ onClose, onImported }: {
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/35 p-4 backdrop-blur-sm">
       <div className="surface max-h-[90vh] w-full max-w-2xl overflow-auto rounded-3xl border shadow-2xl">
         <div className="border-ui flex items-center justify-between border-b px-6 py-5">
-          <div><h2 className="text-lg font-semibold">新建数据集</h2><p className="muted mt-1 text-sm">支持 CSV / TSV / JSON / Excel / Stata</p></div>
+          <div><h2 className="text-lg font-semibold">新建数据集</h2><p className="muted mt-1 text-sm">支持 CSV / TSV / JSON / Excel .xlsx / Stata</p></div>
           <button onClick={onClose} className="muted rounded-lg p-2 hover:surface-2"><X size={19}/></button>
         </div>
 
@@ -266,7 +266,7 @@ function ImportDialog({ onClose, onImported }: {
               <Upload className="brand mb-3" />
               <span className="font-medium">选择文件</span>
               <span className="muted mt-2 text-sm">最大导入 20,000 行</span>
-              <input type="file" className="hidden" accept=".csv,.tsv,.txt,.json,.xlsx,.xls,.xlsm,.ods,.dta"
+              <input type="file" className="hidden" accept=".csv,.tsv,.txt,.json,.xlsx,.xlsm,.dta"
                 onChange={(e) => e.target.files?.[0] && void parseFile(e.target.files[0])}/>
             </label>
           )}
@@ -479,11 +479,13 @@ export default function DataAgentApp() {
     setBusy(true);
     try {
       const rows = await loadDatasetRows(meta.id, meta.row_count);
-      setCurrent({ ...meta, rows });
+      const selected: Dataset = { ...meta, rows };
+      setCurrent(selected);
       setHistory(await listHistory(meta.id));
       setMessages([]);
       setView("chat");
       setMobileSidebar(false);
+      return selected;
     } finally { setBusy(false); }
   }, []);
 
@@ -512,9 +514,10 @@ export default function DataAgentApp() {
     setUser(null); setCurrent(null); setDatasets([]); setMessages([]);
   };
 
-  const ask = async (text?: string) => {
+  const ask = async (text?: string, datasetOverride?: Dataset) => {
     const q = (text ?? question).trim();
-    if (!q || !current || !model || busy) return;
+    const target = datasetOverride || current;
+    if (!q || !target || !model || busy) return;
     setQuestion("");
     setBusy(true);
     const id = uid();
@@ -528,7 +531,7 @@ export default function DataAgentApp() {
     try {
       const out = await Agent.analyze({
         model,
-        dataset: current,
+        dataset: target,
         question: q,
         prefs: settingsState,
         onStage: (stage: string) => patch({ stage }),
@@ -549,7 +552,7 @@ export default function DataAgentApp() {
 
       if (out.task === "analyze") {
         await Cloud.db.insert("analyses", {
-          dataset_id: current.id,
+          dataset_id: target.id,
           question: q,
           kind: out.result.kind || "analysis",
           plan: out.plan,
@@ -557,7 +560,7 @@ export default function DataAgentApp() {
           summary: (out.report || "").slice(0, 20000),
           model,
         });
-        setHistory(await listHistory(current.id));
+        setHistory(await listHistory(target.id));
       }
     } catch (e) {
       patch({ stage: "失败", error: Cloud.errText(e) });
@@ -581,8 +584,10 @@ export default function DataAgentApp() {
   const imported = async (dataset: DatasetMeta) => {
     const list = await refreshDatasets();
     const meta = list.find((d) => d.id === dataset.id) || dataset;
-    await selectDataset(meta);
-    if (settingsState.autoAnalyze) setTimeout(() => void ask("给我一份这份数据的整体概览"), 0);
+    const selected = await selectDataset(meta);
+    if (settingsState.autoAnalyze && selected) {
+      await ask("给我一份这份数据的整体概览", selected);
+    }
   };
 
   const removeDataset = async () => {
