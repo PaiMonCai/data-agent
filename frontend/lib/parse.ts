@@ -1,5 +1,4 @@
 // @ts-nocheck
-import * as XLSX from "xlsx";
 
 /* 数据解析：分隔文本 / JSON -> { headers, rows, columns } */
 const Parse = (function () {
@@ -180,7 +179,8 @@ const Parse = (function () {
 
   function isExcel(fileName) { return XLSX_EXT.test(String(fileName || '')); }
 
-  function workbook(arrayBuffer) {
+  async function workbook(arrayBuffer) {
+    const XLSX = await import('xlsx');
     const wb = XLSX.read(arrayBuffer, { type: 'array' });
     if (!wb.SheetNames.length) throw new Error('这个文件里没有工作表');
     return {

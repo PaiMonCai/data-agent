@@ -14,9 +14,14 @@ Data Agent 已从 `index.html + Vanilla JavaScript` 迁移到：
 
 ```
 frontend/
-├── app/
-├── components/
-└── lib/
+├── app/                     # App Router 入口、全局样式、error / not-found 边界
+├── components/              # 跨功能复用的展示组件
+├── features/                # 按领域切分的功能模块
+│   ├── auth/                #   登录 / 注册 / 验证码
+│   ├── chat/                #   会话、结果卡片、消息列表、模型层
+│   ├── datasets/            #   数据集侧边栏、导入
+│   └── settings/            #   偏好设置抽屉
+└── lib/                     # 与 UI 无关的纯逻辑与 API 客户端
 ```
 
 ## 开发
@@ -34,6 +39,15 @@ npm run dev
 ```bash
 npm run typecheck
 ```
+
+测试（Node 内置 test runner，零额外依赖）：
+
+```bash
+npm test
+```
+
+测试文件与被测模块同目录，命名 `*.test.ts`，覆盖 `lib/` 下零依赖的纯逻辑。
+`tsconfig.json` 因此开启了 `allowImportingTsExtensions`，测试用 `./markdown.ts` 这类带扩展名的相对路径导入。
 
 生产构建：
 
@@ -112,6 +126,12 @@ Next.js / React / TypeScript
 
 - Stata 数据适配
 
+`lib/markdown.ts`
+
+- 零依赖的 Markdown 解析器，输出 AST（刻意不做完整 CommonMark）
+- 覆盖标题、段落、列表、引用、代码块、分隔线、表格，以及行内加粗 / 斜体 / 行内代码 / 删除线 / 链接
+- 表格要求首尾都有竖线；缺分隔行时按普通段落处理，不会丢内容
+- 由 `components/markdown-view.tsx` 渲染成 React 元素，不使用 `dangerouslySetInnerHTML`
 `lib/engine.ts`
 
 - 聚合
@@ -131,7 +151,7 @@ Next.js / React / TypeScript
 - 本地真实计算
 - 模型解释生成
 
-成熟分析算法是从原 Vanilla JS 版本直接迁移而来，目前这些模块局部使用 `@ts-nocheck` 以降低一次迁移风险。React UI、API、状态和类型层已经使用 strict TypeScript。后续可以逐模块消除 `@ts-nocheck`。
+成熟分析算法是从原 Vanilla JS 版本直接迁移而来，目前这些模块局部使用 `@ts-nocheck` 以降低一次迁移风险。React UI、API、状态和类型层已经使用 strict TypeScript。后续可以逐模块消除 `@ts-nocheck`。（当前涉及 `agent.ts` / `charts.ts` / `clean.ts` / `dta.ts` / `engine.ts` / `parse.ts`）
 
 ## 原前端
 
