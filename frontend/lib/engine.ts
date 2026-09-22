@@ -1,5 +1,8 @@
+// @ts-nocheck
+import { Parse } from "./parse";
+
 /* 本地分析引擎：真实执行聚合 / 趋势 / 异常 / 对比 / 相关性计算，数字全部由数据算出，不由模型编造 */
-window.Engine = (function () {
+const Engine = (function () {
   const N = Parse.toNumber;
   const D = Parse.toDate;
 
@@ -558,3 +561,7 @@ window.Engine = (function () {
 
   return { run, brief, aggLabel, pass };
 })();
+
+
+export { Engine };
+export default Engine;

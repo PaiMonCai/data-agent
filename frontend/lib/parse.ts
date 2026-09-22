@@ -1,5 +1,8 @@
+// @ts-nocheck
+import * as XLSX from "xlsx";
+
 /* 数据解析：分隔文本 / JSON -> { headers, rows, columns } */
-window.Parse = (function () {
+const Parse = (function () {
 
   function detectDelimiter(text) {
     const head = text.split(/\r?\n/).slice(0, 5).join('\n');
@@ -178,8 +181,7 @@ window.Parse = (function () {
   function isExcel(fileName) { return XLSX_EXT.test(String(fileName || '')); }
 
   function workbook(arrayBuffer) {
-    if (!window.XLSX) throw new Error('Excel 解析组件未加载，请刷新页面后重试');
-    const wb = window.XLSX.read(arrayBuffer, { type: 'array' });
+    const wb = XLSX.read(arrayBuffer, { type: 'array' });
     if (!wb.SheetNames.length) throw new Error('这个文件里没有工作表');
     return {
       sheets: wb.SheetNames,
@@ -187,15 +189,16 @@ window.Parse = (function () {
         const name = sheetName || wb.SheetNames[0];
         const ws = wb.Sheets[name];
         if (!ws) throw new Error('找不到工作表：' + name);
-        const arr = window.XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+        const arr = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
         if (!arr.length) throw new Error('工作表「' + name + '」没有数据');
-        return build(dedupe(Object.keys(arr[0])), arr.map((o) => {
-          const r = {};
-          Object.keys(arr[0]).forEach((h) => {
+        const headers = dedupe(Object.keys(arr[0]));
+        return build(headers, arr.map((o) => {
+          const row = {};
+          headers.forEach((h) => {
             const v = o[h];
-            r[h] = v === null || v === undefined ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+            row[h] = v === null || v === undefined ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
           });
-          return r;
+          return row;
         }));
       },
     };
@@ -248,10 +251,14 @@ window.Parse = (function () {
   /* ---------- Stata / 统计软件格式 ---------- */
   function isStata(fileName) { return /\.dta$/i.test(String(fileName || '')); }
 
-  async function fromStata(bytes) { return window.Dta.read(bytes); }
+  async function fromStata(bytes) { const { Dta } = await import('./dta'); return Dta.read(bytes); }
 
   return {
     fromText, fromJSON, workbook, isExcel, isStata, fromStata,
     sampleData, inferColumns, toNumber, toDate, inferColumnType,
   };
 })();
+
+
+export { Parse };
+export default Parse;

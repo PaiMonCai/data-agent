@@ -1,17 +1,26 @@
-FROM node:22-alpine AS build
+FROM node:22-alpine AS frontend-build
+WORKDIR /app/frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend ./
+RUN npm run build
+
+FROM node:22-alpine AS server-build
 WORKDIR /app/server
 
-COPY server/package.json ./
-RUN npm install
+COPY server/package.json server/package-lock.json ./
+RUN npm ci
 
 COPY server/prisma ./prisma
 COPY server/prisma.config.ts ./
 COPY server/tsconfig.json ./
 COPY server/src ./src
 
-ENV DATABASE_URL=postgresql://data_agent:build@127.0.0.1:5432/data_agent
-ENV SESSION_SECRET=build-only-session-secret-32-characters-long
-RUN npm run build
+RUN DATABASE_URL=postgresql://data_agent:build@127.0.0.1:5432/data_agent \
+    SESSION_SECRET=build-only-session-secret-32-characters-long \
+    npm run build
 
 FROM node:22-alpine AS runtime
 WORKDIR /app/server
@@ -21,14 +30,13 @@ ENV PORT=3000
 ENV SERVE_STATIC=true
 ENV STATIC_ROOT=./public
 
-COPY server/package.json ./
+COPY server/package.json server/package-lock.json ./
 COPY server/prisma ./prisma
 COPY server/prisma.config.ts ./
-RUN npm install --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
-COPY --from=build /app/server/dist ./dist
-COPY index.html ./public/index.html
-COPY assets ./public/assets
+COPY --from=server-build /app/server/dist ./dist
+COPY --from=frontend-build /app/frontend/out ./public
 
 EXPOSE 3000
 

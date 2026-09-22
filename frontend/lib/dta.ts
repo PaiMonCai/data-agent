@@ -1,20 +1,24 @@
+// @ts-nocheck
+import { Parse } from "./parse";
+
 /* Stata .dta 解析适配器
    底层用 @irbisadm/statfmt（ReadStat 的纯 TypeScript 移植，无 WASM、无原生依赖），
    按需从 CDN 动态 import，只在用户真的上传 .dta 时才加载，不影响首屏。
    注意：statfmt 顶层 index.js 会连带引入依赖 node:zlib 的 SPSS 模块，浏览器里加载会失败，
    所以这里只 import Stata 用到的几个子模块，绕开顶层入口。 */
-window.Dta = (function () {
+const Dta = (function () {
   const CDN = 'https://cdn.jsdelivr.net/npm/@irbisadm/statfmt@0.1.1/dist/';
   let cache = null;
+  const remoteImport = (url) => new Function('u', 'return import(u)')(url);
 
   async function load(base) {
     if (cache) return cache;
     const b = base || CDN;
     const [parserMod, ioMod, errMod, dtaMod] = await Promise.all([
-      import(b + 'parser.js'),
-      import(b + 'io.js'),
-      import(b + 'errors.js'),
-      import(b + 'stata/dta-read.js'),
+      remoteImport(b + 'parser.js'),
+      remoteImport(b + 'io.js'),
+      remoteImport(b + 'errors.js'),
+      remoteImport(b + 'stata/dta-read.js'),
     ]);
     cache = {
       ReadStatParser: parserMod.ReadStatParser,
@@ -158,3 +162,7 @@ window.Dta = (function () {
 
   return { read, load };
 })();
+
+
+export { Dta };
+export default Dta;

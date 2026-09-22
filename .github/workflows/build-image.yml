@@ -4,8 +4,7 @@ on:
   pull_request:
     paths:
       - "server/**"
-      - "assets/**"
-      - "index.html"
+      - "frontend/**"
       - ".github/workflows/build-image.yml"
   push:
     branches:

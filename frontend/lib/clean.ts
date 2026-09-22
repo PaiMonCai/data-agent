@@ -1,6 +1,9 @@
+// @ts-nocheck
+import { Parse } from "./parse";
+
 /* 数据清洗引擎：用自然语言描述 -> 操作序列 -> 在这里真实执行，输出逐步清洗报告
    设计原则同分析引擎：不改数据语义，不执行任何来自模型的字符串代码（表达式走自研解析器） */
-window.Clean = (function () {
+const Clean = (function () {
   const N = Parse.toNumber;
   const D = Parse.toDate;
 
@@ -469,3 +472,7 @@ window.Clean = (function () {
 
   return { run, evalExpr, isBlank };
 })();
+
+
+export { Clean };
+export default Clean;

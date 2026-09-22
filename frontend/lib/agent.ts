@@ -1,5 +1,10 @@
+// @ts-nocheck
+import { Cloud } from "./api";
+import { Engine } from "./engine";
+import { Clean } from "./clean";
+
 /* 分析 Agent：自然语言 -> 结构化分析计划 -> 本地真实计算 -> 模型生成结论 */
-window.Agent = (function () {
+const Agent = (function () {
 
   const PLAN_SYSTEM = `你是一个数据分析与数据处理规划器。先判断用户想要的是「分析」还是「清洗整理」，再输出 JSON 计划。
 
@@ -349,3 +354,7 @@ ${Engine.brief(result)}`;
 
   return { analyze, schemaBrief };
 })();
+
+
+export { Agent };
+export default Agent;

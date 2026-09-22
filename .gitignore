@@ -2,6 +2,10 @@ server/node_modules/
 server/dist/
 server/src/generated/
 server/.env
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
 .env
 *.log
 .DS_Store

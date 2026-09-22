@@ -1,6 +1,9 @@
+// @ts-nocheck
+import * as echarts from "echarts";
+
 /* 图表渲染：把引擎算出的结构化结果转成 ECharts 配置
    配色读取 documentElement.dataset.theme，深色模式自动换成深色版令牌 */
-window.Charts = (function () {
+const Charts = (function () {
   // 与 styles.css 的设计令牌保持一致（品牌 / 成功 / 警告 / 危险 / 信息 …）
   const PALETTE = ['#5b5bd6', '#059669', '#d97706', '#dc2626', '#0284c7', '#7c3aed', '#db2777', '#65a30d'];
   const PALETTE_DARK = ['#8f8ff2', '#34d399', '#fbbf24', '#f87171', '#38bdf8', '#c084fc', '#f472b6', '#a3e635'];
@@ -148,7 +151,7 @@ window.Charts = (function () {
   }
 
   function render(el, result) {
-    if (!window.echarts) return null;
+    if (!echarts) return null;
     const option = build(result);
     el.__result = result; // 主题切换后要用它重画
     if (!option) {
@@ -170,3 +173,7 @@ window.Charts = (function () {
 
   return { render, build, rerenderAll };
 })();
+
+
+export { Charts };
+export default Charts;
