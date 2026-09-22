@@ -38,7 +38,7 @@ jobs:
       MAIL_MODE: console
       LLM_BASE_URL: http://127.0.0.1:4010/v1
       LLM_API_KEY: ci-key
-      LLM_REQUESTS_PER_MINUTE: "1"
+      LLM_REQUESTS_PER_MINUTE: "2"
       LLM_REQUESTS_PER_DAY: "10"
       BOOTSTRAP_ADMIN_EMAIL: admin@example.com
       BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password
@@ -137,14 +137,16 @@ jobs:
           curl -fsS -b /tmp/admin-cookies.txt \
             -X PATCH \
             -H 'Content-Type: application/json' \
-            -d '{"providers":[{"id":"ci","name":"CI Provider","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model"],"enabled":true}]}' \
+            -d '{"providers":[{"id":"ci-a","name":"CI A","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":[{"publicModel":"mock-model","upstreamModel":"mock-model-a","enabled":true}],"enabled":true},{"id":"ci-b","name":"CI B","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":[{"publicModel":"mock-model","upstreamModel":"mock-model-b","enabled":true}],"enabled":true}],"routing":{"mock-model":"round_robin"}}' \
             http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-after.json
           grep -q '"source":"database"' /tmp/admin-llm-after.json
           grep -q '"hasApiKey":true' /tmp/admin-llm-after.json
           ! grep -q 'ci-key' /tmp/admin-llm-after.json
 
           curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/runtime-models.json
-          grep -q 'ci::mock-model' /tmp/runtime-models.json
+          test "$(jq '.data | length' /tmp/runtime-models.json)" = "1"
+          test "$(jq -r '.data[0].id' /tmp/runtime-models.json)" = "mock-model"
+          ! grep -q '::' /tmp/runtime-models.json
 
           curl -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"name":"CI Dataset","source":"sample","columns":[{"name":"x","type":"number"}],"rows":[{"x":1},{"x":2}]}'             http://127.0.0.1:3000/api/data/import > /tmp/dataset-create.json
           grep -q 'CI Dataset' /tmp/dataset-create.json
@@ -165,12 +167,17 @@ jobs:
           curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/models.json
           grep -q 'mock-model' /tmp/models.json
 
-          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"ping"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream.txt
-          grep -q 'hello ' /tmp/stream.txt
-          grep -q 'world' /tmp/stream.txt
-          grep -q '\[DONE\]' /tmp/stream.txt
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"first"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-a.txt
+          grep -q 'channel-' /tmp/stream-a.txt
+          grep -q '"a"' /tmp/stream-a.txt
+          grep -q '\[DONE\]' /tmp/stream-a.txt
 
-          RATE_STATUS=$(curl -sS -o /tmp/rate.json -w '%{http_code}'             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":false,"messages":[{"role":"user","content":"second request"}]}'             http://127.0.0.1:3000/api/llm/chat/completions)
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"second"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-b.txt
+          grep -q 'channel-' /tmp/stream-b.txt
+          grep -q '"b"' /tmp/stream-b.txt
+          grep -q '\[DONE\]' /tmp/stream-b.txt
+
+          RATE_STATUS=$(curl -sS -o /tmp/rate.json -w '%{http_code}'             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":false,"messages":[{"role":"user","content":"third request"}]}'             http://127.0.0.1:3000/api/llm/chat/completions)
           test "$RATE_STATUS" = "429"
           grep -q '"llm_rate_minute"' /tmp/rate.json
 
