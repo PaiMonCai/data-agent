@@ -296,9 +296,10 @@ export async function saveMailSettings(input: {
 }) {
   const previous = await prisma.systemSetting.findUnique({ where: { key: "smtp" } });
   const old = (previous?.value || {}) as Record<string, unknown>;
+  const current = await resolveMailConfig();
   const password =
     input.password === undefined || input.password === ""
-      ? String(old.password || "")
+      ? String(old.password || (current.pass ? encryptSystemSecret(current.pass) : ""))
       : encryptSystemSecret(input.password);
 
   await prisma.systemSetting.upsert({
