@@ -287,7 +287,10 @@ jobs:
           trap 'if [ -f /tmp/data-agent-installer-smoke/compose.yaml ]; then cd /tmp/data-agent-installer-smoke && sudo docker compose down -v --remove-orphans || true; fi; sudo rm -rf /tmp/data-agent-installer-smoke' EXIT
           sudo -E bash install.sh --yes
           curl -fsS http://127.0.0.1:19003/api/health | grep -q '"ok":true'
-          sudo grep -q '^BOOTSTRAP_ADMIN_PASSWORD= /tmp/data-agent-installer-smoke/.env
+          sudo grep -q '^BOOTSTRAP_ADMIN_PASSWORD=          APP_ID="$(cd /tmp/data-agent-installer-smoke && sudo docker compose ps -q app)"
+          test -n "$APP_ID"
+          test "$(sudo docker inspect "$APP_ID" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^BOOTSTRAP_ADMIN_PASSWORD=' | tail -1)" = "BOOTSTRAP_ADMIN_PASSWORD="
+ /tmp/data-agent-installer-smoke/.env
           APP_ID="$(cd /tmp/data-agent-installer-smoke && sudo docker compose ps -q app)"
           test -n "$APP_ID"
           test "$(sudo docker inspect "$APP_ID" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^BOOTSTRAP_ADMIN_PASSWORD=' | tail -1)" = "BOOTSTRAP_ADMIN_PASSWORD="
