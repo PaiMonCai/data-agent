@@ -17,6 +17,10 @@ DB_USERNAME="${DB_USERNAME:-${DATA_AGENT_DB_USERNAME:-data_agent}}"
 DB_PASSWORD="${DB_PASSWORD:-${DATA_AGENT_DB_PASSWORD:-}}"
 DATABASE_URL="${DATABASE_URL:-${DATA_AGENT_DATABASE_URL:-}}"
 
+shell_quote() {
+  printf '%q' "$1"
+}
+
 validate_db_ident() {
   [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] ||
     die "database name/user must contain only letters, digits and underscore, and cannot start with a digit: $1"
@@ -176,13 +180,12 @@ EOF
   fi
 
   log "creating/updating Data Agent database in host container $container_name..."
-  provision_postgres_runner \
-    "postgres_container_exec '$container_id' '$admin_user' '$admin_db' '$admin_password' -X" \
-    "$DB_USERNAME" "$DB_DATABASE" "$DB_PASSWORD"
+  local admin_runner database_runner
+  admin_runner="postgres_container_exec $(shell_quote "$container_id") $(shell_quote "$admin_user") $(shell_quote "$admin_db") $(shell_quote "$admin_password") -X"
+  database_runner="postgres_container_exec $(shell_quote "$container_id") $(shell_quote "$admin_user") $(shell_quote "$DB_DATABASE") $(shell_quote "$admin_password") -X"
 
-  repair_postgres_ownership_runner \
-    "postgres_container_exec '$container_id' '$admin_user' '$DB_DATABASE' '$admin_password' -X" \
-    "$DB_USERNAME"
+  provision_postgres_runner "$admin_runner" "$DB_USERNAME" "$DB_DATABASE" "$DB_PASSWORD"
+  repair_postgres_ownership_runner "$database_runner" "$DB_USERNAME"
 
   port="$(postgres_container_exec "$container_id" "$admin_user" "$admin_db" "$admin_password" -Atqc 'SHOW port' | tail -n1 | tr -d '[:space:]')"
   valid_port "$port" || port=5432
@@ -237,8 +240,11 @@ setup_host_system_postgres() {
     repair_postgres_ownership_runner "system_postgres_local_runner -X -d '$DB_DATABASE'" "$DB_USERNAME"
     source_port="$(system_postgres_local_runner -X -d postgres -Atqc 'SHOW port' | tail -n1 | tr -d '[:space:]')"
   else
-    provision_postgres_runner "PGPASSWORD='$admin_password' psql -X -h 127.0.0.1 -U '$admin_user' -d postgres" "$DB_USERNAME" "$DB_DATABASE" "$DB_PASSWORD"
-    repair_postgres_ownership_runner "PGPASSWORD='$admin_password' psql -X -h 127.0.0.1 -U '$admin_user' -d '$DB_DATABASE'" "$DB_USERNAME"
+    local admin_runner database_runner
+    admin_runner="PGPASSWORD=$(shell_quote "$admin_password") psql -X -h 127.0.0.1 -U $(shell_quote "$admin_user") -d postgres"
+    database_runner="PGPASSWORD=$(shell_quote "$admin_password") psql -X -h 127.0.0.1 -U $(shell_quote "$admin_user") -d $(shell_quote "$DB_DATABASE")"
+    provision_postgres_runner "$admin_runner" "$DB_USERNAME" "$DB_DATABASE" "$DB_PASSWORD"
+    repair_postgres_ownership_runner "$database_runner" "$DB_USERNAME"
     source_port="$(PGPASSWORD="$admin_password" psql -X -h 127.0.0.1 -U "$admin_user" -d postgres -Atqc 'SHOW port' | tail -n1 | tr -d '[:space:]')"
   fi
   valid_port "$source_port" || source_port=5432
