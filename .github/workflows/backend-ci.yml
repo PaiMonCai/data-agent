@@ -44,6 +44,1121 @@ jobs:
       BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password
     steps:
       - uses: actions/checkout@v4
+      - name: Check installer syntax
+        working-directory: .
+        run: |
+          bash -n install.sh
+          bash -n deploy/install-database.sh
+
+      - name: Render one-click local deployment
+        working-directory: .
+        env:
+          DATA_AGENT_INSTALL_DIR: /tmp/data-agent-installer-local
+          DATA_AGENT_ADMIN_EMAIL: ci-admin@example.com
+          DATA_AGENT_APP_PORT: "19000"
+          DATA_AGENT_APP_ORIGIN: http://127.0.0.1:19000
+          DATA_AGENT_ACCESS_MODE: http
+          DATA_AGENT_DB_MODE: local
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+        run: |
+          sudo -E bash install.sh --yes --render-only
+          cd /tmp/data-agent-installer-local
+          sudo docker compose config >/dev/null
+          sudo docker compose config --services | grep -qx postgres
+          sudo grep -q '^DATA_AGENT_DB_MODE=local        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Validate frontend static export
+        working-directory: frontend
+        run: |
+          test -f out/index.html
+          test -f out/admin/index.html
+          test -d out/_next
+
+      - name: Install server dependencies
+        run: npm ci
+      - name: Audit server dependencies
+        run: npm audit --audit-level=high
+      - run: npm run validate
+      - run: npm run generate
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx prisma migrate deploy
+
+      - name: Runtime smoke test
+        shell: bash
+        run: |
+          node scripts/mock-llm.mjs > /tmp/mock-llm.log 2>&1 &
+          MOCK_PID=$!
+          node dist/index.js > /tmp/data-agent-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" "$MOCK_PID" 2>/dev/null || true; echo "--- app log ---"; cat /tmp/data-agent-server.log; echo "--- mock llm log ---"; cat /tmp/mock-llm.log' EXIT
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+          grep -q '"llmConfigured":true' /tmp/health.json
+
+          STATUS=$(curl -sS -o /tmp/session.json -w '%{http_code}' http://127.0.0.1:3000/api/auth/session)
+          test "$STATUS" = "401"
+          grep -q '"auth_required"' /tmp/session.json
+
+          OTP_RESPONSE=$(curl -fsS             -H 'Content-Type: application/json'             -d '{"email":"ci@example.com","purpose":"login"}'             http://127.0.0.1:3000/api/auth/otp/request)
+          VERIFICATION_ID=$(printf '%s' "$OTP_RESPONSE" | jq -r '.verificationId')
+          test -n "$VERIFICATION_ID"
+          test "$VERIFICATION_ID" != "null"
+
+          for i in {1..10}; do
+            CODE=$(grep '\[OTP\] ci@example.com' /tmp/data-agent-server.log | tail -1 | sed -nE 's/.* ([0-9]{6})$/\1/p' || true)
+            if [ -n "$CODE" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$CODE"
+
+          curl -fsS             -c /tmp/cookies.txt             -H 'Content-Type: application/json'             -d "$(jq -nc --arg id "$VERIFICATION_ID" --arg code "$CODE" '{verificationId:$id,token:$code,email:"ci@example.com",purpose:"login"}')"             http://127.0.0.1:3000/api/auth/otp/verify > /tmp/login.json
+          grep -q 'ci@example.com' /tmp/login.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/auth/session > /tmp/session-auth.json
+          grep -q 'ci@example.com' /tmp/session-auth.json
+
+          curl -fsS \
+            -c /tmp/admin-cookies.txt \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@example.com","password":"ci-admin-password"}' \
+            http://127.0.0.1:3000/api/auth/password > /tmp/admin-login.json
+          grep -q '"role":"admin"' /tmp/admin-login.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-before.json
+          grep -q '"source":"environment"' /tmp/admin-llm-before.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            -X PATCH \
+            -H 'Content-Type: application/json' \
+            -d '{"providers":[{"id":"ci-a","name":"CI A","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-a"],"enabled":true},{"id":"ci-b","name":"CI B","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-b"],"enabled":true}],"models":[{"id":"mock-model","name":"Mock Model","enabled":true,"strategy":"round_robin","channels":[{"id":"channel-a","providerId":"ci-a","upstreamModel":"mock-model-a","enabled":true},{"id":"channel-b","providerId":"ci-b","upstreamModel":"mock-model-b","enabled":true}]}]}' \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-after.json
+          grep -q '"source":"database"' /tmp/admin-llm-after.json
+          grep -q '"hasApiKey":true' /tmp/admin-llm-after.json
+          ! grep -q 'ci-key' /tmp/admin-llm-after.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/runtime-models.json
+          test "$(jq '.data | length' /tmp/runtime-models.json)" = "1"
+          test "$(jq -r '.data[0].id' /tmp/runtime-models.json)" = "mock-model"
+          ! grep -q '::' /tmp/runtime-models.json
+
+          curl -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"name":"CI Dataset","source":"sample","columns":[{"name":"x","type":"number"}],"rows":[{"x":1},{"x":2}]}'             http://127.0.0.1:3000/api/data/import > /tmp/dataset-create.json
+          grep -q 'CI Dataset' /tmp/dataset-create.json
+          grep -q '"row_count":2' /tmp/dataset-create.json
+
+          DATASET_ID=$(jq -r '.[0].id' /tmp/dataset-create.json)
+          test -n "$DATASET_ID"
+          test "$DATASET_ID" != "null"
+
+          curl -fsS             -b /tmp/cookies.txt             'http://127.0.0.1:3000/api/data/datasets?select=id,name,row_count' > /tmp/datasets.json
+          grep -q 'CI Dataset' /tmp/datasets.json
+          grep -q '"row_count":2' /tmp/datasets.json
+
+          curl -fsS             -b /tmp/cookies.txt             "http://127.0.0.1:3000/api/data/dataset_rows?select=row_index,data&eq=%7B%22dataset_id%22%3A%22$DATASET_ID%22%7D&order=%7B%22column%22%3A%22row_index%22%2C%22ascending%22%3Atrue%7D" > /tmp/dataset-rows.json
+          test "$(jq 'length' /tmp/dataset-rows.json)" = "2"
+          test "$(jq -r '.[1].data.x' /tmp/dataset-rows.json)" = "2"
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/models.json
+          grep -q 'mock-model' /tmp/models.json
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"first"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-a.txt
+          grep -q 'channel-' /tmp/stream-a.txt
+          grep -q '"a"' /tmp/stream-a.txt
+          grep -q '\[DONE\]' /tmp/stream-a.txt
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"second"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-b.txt
+          grep -q 'channel-' /tmp/stream-b.txt
+          grep -q '"b"' /tmp/stream-b.txt
+          grep -q '\[DONE\]' /tmp/stream-b.txt
+
+          RATE_STATUS=$(curl -sS -o /tmp/rate.json -w '%{http_code}'             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":false,"messages":[{"role":"user","content":"third request"}]}'             http://127.0.0.1:3000/api/llm/chat/completions)
+          test "$RATE_STATUS" = "429"
+          grep -q '"llm_rate_minute"' /tmp/rate.json
+
+      - name: Validate Compose deployment
+        working-directory: .
+        env:
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+          POSTGRES_PASSWORD: ci-password
+          SESSION_SECRET: ci-session-secret-that-is-at-least-32-characters
+          LLM_BASE_URL: http://127.0.0.1:4010/v1
+        run: docker compose config --quiet
+
+      - name: Docker image build
+        working-directory: .
+        run: docker build -f server/Dockerfile .
+ .env
+          sudo grep -q '^DATA_AGENT_DB_HOST_KIND=managed        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Validate frontend static export
+        working-directory: frontend
+        run: |
+          test -f out/index.html
+          test -f out/admin/index.html
+          test -d out/_next
+
+      - name: Install server dependencies
+        run: npm ci
+      - name: Audit server dependencies
+        run: npm audit --audit-level=high
+      - run: npm run validate
+      - run: npm run generate
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx prisma migrate deploy
+
+      - name: Runtime smoke test
+        shell: bash
+        run: |
+          node scripts/mock-llm.mjs > /tmp/mock-llm.log 2>&1 &
+          MOCK_PID=$!
+          node dist/index.js > /tmp/data-agent-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" "$MOCK_PID" 2>/dev/null || true; echo "--- app log ---"; cat /tmp/data-agent-server.log; echo "--- mock llm log ---"; cat /tmp/mock-llm.log' EXIT
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+          grep -q '"llmConfigured":true' /tmp/health.json
+
+          STATUS=$(curl -sS -o /tmp/session.json -w '%{http_code}' http://127.0.0.1:3000/api/auth/session)
+          test "$STATUS" = "401"
+          grep -q '"auth_required"' /tmp/session.json
+
+          OTP_RESPONSE=$(curl -fsS             -H 'Content-Type: application/json'             -d '{"email":"ci@example.com","purpose":"login"}'             http://127.0.0.1:3000/api/auth/otp/request)
+          VERIFICATION_ID=$(printf '%s' "$OTP_RESPONSE" | jq -r '.verificationId')
+          test -n "$VERIFICATION_ID"
+          test "$VERIFICATION_ID" != "null"
+
+          for i in {1..10}; do
+            CODE=$(grep '\[OTP\] ci@example.com' /tmp/data-agent-server.log | tail -1 | sed -nE 's/.* ([0-9]{6})$/\1/p' || true)
+            if [ -n "$CODE" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$CODE"
+
+          curl -fsS             -c /tmp/cookies.txt             -H 'Content-Type: application/json'             -d "$(jq -nc --arg id "$VERIFICATION_ID" --arg code "$CODE" '{verificationId:$id,token:$code,email:"ci@example.com",purpose:"login"}')"             http://127.0.0.1:3000/api/auth/otp/verify > /tmp/login.json
+          grep -q 'ci@example.com' /tmp/login.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/auth/session > /tmp/session-auth.json
+          grep -q 'ci@example.com' /tmp/session-auth.json
+
+          curl -fsS \
+            -c /tmp/admin-cookies.txt \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@example.com","password":"ci-admin-password"}' \
+            http://127.0.0.1:3000/api/auth/password > /tmp/admin-login.json
+          grep -q '"role":"admin"' /tmp/admin-login.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-before.json
+          grep -q '"source":"environment"' /tmp/admin-llm-before.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            -X PATCH \
+            -H 'Content-Type: application/json' \
+            -d '{"providers":[{"id":"ci-a","name":"CI A","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-a"],"enabled":true},{"id":"ci-b","name":"CI B","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-b"],"enabled":true}],"models":[{"id":"mock-model","name":"Mock Model","enabled":true,"strategy":"round_robin","channels":[{"id":"channel-a","providerId":"ci-a","upstreamModel":"mock-model-a","enabled":true},{"id":"channel-b","providerId":"ci-b","upstreamModel":"mock-model-b","enabled":true}]}]}' \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-after.json
+          grep -q '"source":"database"' /tmp/admin-llm-after.json
+          grep -q '"hasApiKey":true' /tmp/admin-llm-after.json
+          ! grep -q 'ci-key' /tmp/admin-llm-after.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/runtime-models.json
+          test "$(jq '.data | length' /tmp/runtime-models.json)" = "1"
+          test "$(jq -r '.data[0].id' /tmp/runtime-models.json)" = "mock-model"
+          ! grep -q '::' /tmp/runtime-models.json
+
+          curl -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"name":"CI Dataset","source":"sample","columns":[{"name":"x","type":"number"}],"rows":[{"x":1},{"x":2}]}'             http://127.0.0.1:3000/api/data/import > /tmp/dataset-create.json
+          grep -q 'CI Dataset' /tmp/dataset-create.json
+          grep -q '"row_count":2' /tmp/dataset-create.json
+
+          DATASET_ID=$(jq -r '.[0].id' /tmp/dataset-create.json)
+          test -n "$DATASET_ID"
+          test "$DATASET_ID" != "null"
+
+          curl -fsS             -b /tmp/cookies.txt             'http://127.0.0.1:3000/api/data/datasets?select=id,name,row_count' > /tmp/datasets.json
+          grep -q 'CI Dataset' /tmp/datasets.json
+          grep -q '"row_count":2' /tmp/datasets.json
+
+          curl -fsS             -b /tmp/cookies.txt             "http://127.0.0.1:3000/api/data/dataset_rows?select=row_index,data&eq=%7B%22dataset_id%22%3A%22$DATASET_ID%22%7D&order=%7B%22column%22%3A%22row_index%22%2C%22ascending%22%3Atrue%7D" > /tmp/dataset-rows.json
+          test "$(jq 'length' /tmp/dataset-rows.json)" = "2"
+          test "$(jq -r '.[1].data.x' /tmp/dataset-rows.json)" = "2"
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/models.json
+          grep -q 'mock-model' /tmp/models.json
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"first"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-a.txt
+          grep -q 'channel-' /tmp/stream-a.txt
+          grep -q '"a"' /tmp/stream-a.txt
+          grep -q '\[DONE\]' /tmp/stream-a.txt
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"second"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-b.txt
+          grep -q 'channel-' /tmp/stream-b.txt
+          grep -q '"b"' /tmp/stream-b.txt
+          grep -q '\[DONE\]' /tmp/stream-b.txt
+
+          RATE_STATUS=$(curl -sS -o /tmp/rate.json -w '%{http_code}'             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":false,"messages":[{"role":"user","content":"third request"}]}'             http://127.0.0.1:3000/api/llm/chat/completions)
+          test "$RATE_STATUS" = "429"
+          grep -q '"llm_rate_minute"' /tmp/rate.json
+
+      - name: Validate Compose deployment
+        working-directory: .
+        env:
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+          POSTGRES_PASSWORD: ci-password
+          SESSION_SECRET: ci-session-secret-that-is-at-least-32-characters
+          LLM_BASE_URL: http://127.0.0.1:4010/v1
+        run: docker compose config --quiet
+
+      - name: Docker image build
+        working-directory: .
+        run: docker build -f server/Dockerfile .
+ .env
+          sudo rm -rf /tmp/data-agent-installer-local
+
+      - name: Render one-click external database deployment
+        working-directory: .
+        env:
+          DATA_AGENT_INSTALL_DIR: /tmp/data-agent-installer-external
+          DATA_AGENT_ADMIN_EMAIL: ci-admin@example.com
+          DATA_AGENT_APP_PORT: "19001"
+          DATA_AGENT_APP_ORIGIN: http://127.0.0.1:19001
+          DATA_AGENT_ACCESS_MODE: http
+          DATA_AGENT_DB_MODE: external
+          DATA_AGENT_DATABASE_URL: postgresql://data_agent:ci-secret@db.example.internal:5432/data_agent?sslmode=require
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+        run: |
+          sudo -E bash install.sh --yes --render-only
+          cd /tmp/data-agent-installer-external
+          sudo docker compose config >/dev/null
+          ! sudo docker compose config --services | grep -qx postgres
+          sudo grep -q '^DATA_AGENT_DB_MODE=external        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Validate frontend static export
+        working-directory: frontend
+        run: |
+          test -f out/index.html
+          test -f out/admin/index.html
+          test -d out/_next
+
+      - name: Install server dependencies
+        run: npm ci
+      - name: Audit server dependencies
+        run: npm audit --audit-level=high
+      - run: npm run validate
+      - run: npm run generate
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx prisma migrate deploy
+
+      - name: Runtime smoke test
+        shell: bash
+        run: |
+          node scripts/mock-llm.mjs > /tmp/mock-llm.log 2>&1 &
+          MOCK_PID=$!
+          node dist/index.js > /tmp/data-agent-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" "$MOCK_PID" 2>/dev/null || true; echo "--- app log ---"; cat /tmp/data-agent-server.log; echo "--- mock llm log ---"; cat /tmp/mock-llm.log' EXIT
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+          grep -q '"llmConfigured":true' /tmp/health.json
+
+          STATUS=$(curl -sS -o /tmp/session.json -w '%{http_code}' http://127.0.0.1:3000/api/auth/session)
+          test "$STATUS" = "401"
+          grep -q '"auth_required"' /tmp/session.json
+
+          OTP_RESPONSE=$(curl -fsS             -H 'Content-Type: application/json'             -d '{"email":"ci@example.com","purpose":"login"}'             http://127.0.0.1:3000/api/auth/otp/request)
+          VERIFICATION_ID=$(printf '%s' "$OTP_RESPONSE" | jq -r '.verificationId')
+          test -n "$VERIFICATION_ID"
+          test "$VERIFICATION_ID" != "null"
+
+          for i in {1..10}; do
+            CODE=$(grep '\[OTP\] ci@example.com' /tmp/data-agent-server.log | tail -1 | sed -nE 's/.* ([0-9]{6})$/\1/p' || true)
+            if [ -n "$CODE" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$CODE"
+
+          curl -fsS             -c /tmp/cookies.txt             -H 'Content-Type: application/json'             -d "$(jq -nc --arg id "$VERIFICATION_ID" --arg code "$CODE" '{verificationId:$id,token:$code,email:"ci@example.com",purpose:"login"}')"             http://127.0.0.1:3000/api/auth/otp/verify > /tmp/login.json
+          grep -q 'ci@example.com' /tmp/login.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/auth/session > /tmp/session-auth.json
+          grep -q 'ci@example.com' /tmp/session-auth.json
+
+          curl -fsS \
+            -c /tmp/admin-cookies.txt \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@example.com","password":"ci-admin-password"}' \
+            http://127.0.0.1:3000/api/auth/password > /tmp/admin-login.json
+          grep -q '"role":"admin"' /tmp/admin-login.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-before.json
+          grep -q '"source":"environment"' /tmp/admin-llm-before.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            -X PATCH \
+            -H 'Content-Type: application/json' \
+            -d '{"providers":[{"id":"ci-a","name":"CI A","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-a"],"enabled":true},{"id":"ci-b","name":"CI B","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-b"],"enabled":true}],"models":[{"id":"mock-model","name":"Mock Model","enabled":true,"strategy":"round_robin","channels":[{"id":"channel-a","providerId":"ci-a","upstreamModel":"mock-model-a","enabled":true},{"id":"channel-b","providerId":"ci-b","upstreamModel":"mock-model-b","enabled":true}]}]}' \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-after.json
+          grep -q '"source":"database"' /tmp/admin-llm-after.json
+          grep -q '"hasApiKey":true' /tmp/admin-llm-after.json
+          ! grep -q 'ci-key' /tmp/admin-llm-after.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/runtime-models.json
+          test "$(jq '.data | length' /tmp/runtime-models.json)" = "1"
+          test "$(jq -r '.data[0].id' /tmp/runtime-models.json)" = "mock-model"
+          ! grep -q '::' /tmp/runtime-models.json
+
+          curl -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"name":"CI Dataset","source":"sample","columns":[{"name":"x","type":"number"}],"rows":[{"x":1},{"x":2}]}'             http://127.0.0.1:3000/api/data/import > /tmp/dataset-create.json
+          grep -q 'CI Dataset' /tmp/dataset-create.json
+          grep -q '"row_count":2' /tmp/dataset-create.json
+
+          DATASET_ID=$(jq -r '.[0].id' /tmp/dataset-create.json)
+          test -n "$DATASET_ID"
+          test "$DATASET_ID" != "null"
+
+          curl -fsS             -b /tmp/cookies.txt             'http://127.0.0.1:3000/api/data/datasets?select=id,name,row_count' > /tmp/datasets.json
+          grep -q 'CI Dataset' /tmp/datasets.json
+          grep -q '"row_count":2' /tmp/datasets.json
+
+          curl -fsS             -b /tmp/cookies.txt             "http://127.0.0.1:3000/api/data/dataset_rows?select=row_index,data&eq=%7B%22dataset_id%22%3A%22$DATASET_ID%22%7D&order=%7B%22column%22%3A%22row_index%22%2C%22ascending%22%3Atrue%7D" > /tmp/dataset-rows.json
+          test "$(jq 'length' /tmp/dataset-rows.json)" = "2"
+          test "$(jq -r '.[1].data.x' /tmp/dataset-rows.json)" = "2"
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/models.json
+          grep -q 'mock-model' /tmp/models.json
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"first"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-a.txt
+          grep -q 'channel-' /tmp/stream-a.txt
+          grep -q '"a"' /tmp/stream-a.txt
+          grep -q '\[DONE\]' /tmp/stream-a.txt
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"second"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-b.txt
+          grep -q 'channel-' /tmp/stream-b.txt
+          grep -q '"b"' /tmp/stream-b.txt
+          grep -q '\[DONE\]' /tmp/stream-b.txt
+
+          RATE_STATUS=$(curl -sS -o /tmp/rate.json -w '%{http_code}'             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":false,"messages":[{"role":"user","content":"third request"}]}'             http://127.0.0.1:3000/api/llm/chat/completions)
+          test "$RATE_STATUS" = "429"
+          grep -q '"llm_rate_minute"' /tmp/rate.json
+
+      - name: Validate Compose deployment
+        working-directory: .
+        env:
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+          POSTGRES_PASSWORD: ci-password
+          SESSION_SECRET: ci-session-secret-that-is-at-least-32-characters
+          LLM_BASE_URL: http://127.0.0.1:4010/v1
+        run: docker compose config --quiet
+
+      - name: Docker image build
+        working-directory: .
+        run: docker build -f server/Dockerfile .
+ .env
+          sudo grep -q '^DATA_AGENT_DB_HOST_KIND=external        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Validate frontend static export
+        working-directory: frontend
+        run: |
+          test -f out/index.html
+          test -f out/admin/index.html
+          test -d out/_next
+
+      - name: Install server dependencies
+        run: npm ci
+      - name: Audit server dependencies
+        run: npm audit --audit-level=high
+      - run: npm run validate
+      - run: npm run generate
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx prisma migrate deploy
+
+      - name: Runtime smoke test
+        shell: bash
+        run: |
+          node scripts/mock-llm.mjs > /tmp/mock-llm.log 2>&1 &
+          MOCK_PID=$!
+          node dist/index.js > /tmp/data-agent-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" "$MOCK_PID" 2>/dev/null || true; echo "--- app log ---"; cat /tmp/data-agent-server.log; echo "--- mock llm log ---"; cat /tmp/mock-llm.log' EXIT
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+          grep -q '"llmConfigured":true' /tmp/health.json
+
+          STATUS=$(curl -sS -o /tmp/session.json -w '%{http_code}' http://127.0.0.1:3000/api/auth/session)
+          test "$STATUS" = "401"
+          grep -q '"auth_required"' /tmp/session.json
+
+          OTP_RESPONSE=$(curl -fsS             -H 'Content-Type: application/json'             -d '{"email":"ci@example.com","purpose":"login"}'             http://127.0.0.1:3000/api/auth/otp/request)
+          VERIFICATION_ID=$(printf '%s' "$OTP_RESPONSE" | jq -r '.verificationId')
+          test -n "$VERIFICATION_ID"
+          test "$VERIFICATION_ID" != "null"
+
+          for i in {1..10}; do
+            CODE=$(grep '\[OTP\] ci@example.com' /tmp/data-agent-server.log | tail -1 | sed -nE 's/.* ([0-9]{6})$/\1/p' || true)
+            if [ -n "$CODE" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$CODE"
+
+          curl -fsS             -c /tmp/cookies.txt             -H 'Content-Type: application/json'             -d "$(jq -nc --arg id "$VERIFICATION_ID" --arg code "$CODE" '{verificationId:$id,token:$code,email:"ci@example.com",purpose:"login"}')"             http://127.0.0.1:3000/api/auth/otp/verify > /tmp/login.json
+          grep -q 'ci@example.com' /tmp/login.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/auth/session > /tmp/session-auth.json
+          grep -q 'ci@example.com' /tmp/session-auth.json
+
+          curl -fsS \
+            -c /tmp/admin-cookies.txt \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@example.com","password":"ci-admin-password"}' \
+            http://127.0.0.1:3000/api/auth/password > /tmp/admin-login.json
+          grep -q '"role":"admin"' /tmp/admin-login.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-before.json
+          grep -q '"source":"environment"' /tmp/admin-llm-before.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            -X PATCH \
+            -H 'Content-Type: application/json' \
+            -d '{"providers":[{"id":"ci-a","name":"CI A","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-a"],"enabled":true},{"id":"ci-b","name":"CI B","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-b"],"enabled":true}],"models":[{"id":"mock-model","name":"Mock Model","enabled":true,"strategy":"round_robin","channels":[{"id":"channel-a","providerId":"ci-a","upstreamModel":"mock-model-a","enabled":true},{"id":"channel-b","providerId":"ci-b","upstreamModel":"mock-model-b","enabled":true}]}]}' \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-after.json
+          grep -q '"source":"database"' /tmp/admin-llm-after.json
+          grep -q '"hasApiKey":true' /tmp/admin-llm-after.json
+          ! grep -q 'ci-key' /tmp/admin-llm-after.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/runtime-models.json
+          test "$(jq '.data | length' /tmp/runtime-models.json)" = "1"
+          test "$(jq -r '.data[0].id' /tmp/runtime-models.json)" = "mock-model"
+          ! grep -q '::' /tmp/runtime-models.json
+
+          curl -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"name":"CI Dataset","source":"sample","columns":[{"name":"x","type":"number"}],"rows":[{"x":1},{"x":2}]}'             http://127.0.0.1:3000/api/data/import > /tmp/dataset-create.json
+          grep -q 'CI Dataset' /tmp/dataset-create.json
+          grep -q '"row_count":2' /tmp/dataset-create.json
+
+          DATASET_ID=$(jq -r '.[0].id' /tmp/dataset-create.json)
+          test -n "$DATASET_ID"
+          test "$DATASET_ID" != "null"
+
+          curl -fsS             -b /tmp/cookies.txt             'http://127.0.0.1:3000/api/data/datasets?select=id,name,row_count' > /tmp/datasets.json
+          grep -q 'CI Dataset' /tmp/datasets.json
+          grep -q '"row_count":2' /tmp/datasets.json
+
+          curl -fsS             -b /tmp/cookies.txt             "http://127.0.0.1:3000/api/data/dataset_rows?select=row_index,data&eq=%7B%22dataset_id%22%3A%22$DATASET_ID%22%7D&order=%7B%22column%22%3A%22row_index%22%2C%22ascending%22%3Atrue%7D" > /tmp/dataset-rows.json
+          test "$(jq 'length' /tmp/dataset-rows.json)" = "2"
+          test "$(jq -r '.[1].data.x' /tmp/dataset-rows.json)" = "2"
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/models.json
+          grep -q 'mock-model' /tmp/models.json
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"first"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-a.txt
+          grep -q 'channel-' /tmp/stream-a.txt
+          grep -q '"a"' /tmp/stream-a.txt
+          grep -q '\[DONE\]' /tmp/stream-a.txt
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"second"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-b.txt
+          grep -q 'channel-' /tmp/stream-b.txt
+          grep -q '"b"' /tmp/stream-b.txt
+          grep -q '\[DONE\]' /tmp/stream-b.txt
+
+          RATE_STATUS=$(curl -sS -o /tmp/rate.json -w '%{http_code}'             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":false,"messages":[{"role":"user","content":"third request"}]}'             http://127.0.0.1:3000/api/llm/chat/completions)
+          test "$RATE_STATUS" = "429"
+          grep -q '"llm_rate_minute"' /tmp/rate.json
+
+      - name: Validate Compose deployment
+        working-directory: .
+        env:
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+          POSTGRES_PASSWORD: ci-password
+          SESSION_SECRET: ci-session-secret-that-is-at-least-32-characters
+          LLM_BASE_URL: http://127.0.0.1:4010/v1
+        run: docker compose config --quiet
+
+      - name: Docker image build
+        working-directory: .
+        run: docker build -f server/Dockerfile .
+ .env
+          sudo grep -q 'host.docker.internal:host-gateway' compose.yaml
+          sudo rm -rf /tmp/data-agent-installer-external
+
+      - name: Provision host Docker PostgreSQL
+        working-directory: .
+        env:
+          DATA_AGENT_INSTALL_DIR: /tmp/data-agent-installer-host
+          DATA_AGENT_ADMIN_EMAIL: ci-admin@example.com
+          DATA_AGENT_APP_PORT: "19002"
+          DATA_AGENT_APP_ORIGIN: http://127.0.0.1:19002
+          DATA_AGENT_ACCESS_MODE: http
+          DATA_AGENT_DB_MODE: host
+          DATA_AGENT_DB_CONTAINER: data-agent-host-postgres-ci
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+        run: |
+          sudo docker run -d --name data-agent-host-postgres-ci \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=ci-root-password \
+            -e POSTGRES_DB=postgres \
+            postgres:17-alpine >/dev/null
+          trap 'sudo docker rm -f data-agent-host-postgres-ci >/dev/null 2>&1 || true; sudo docker network rm data-agent-db-link >/dev/null 2>&1 || true; sudo rm -rf /tmp/data-agent-installer-host' EXIT
+
+          sudo -E bash install.sh --yes --render-only
+          cd /tmp/data-agent-installer-host
+          sudo docker compose config >/dev/null
+          ! sudo docker compose config --services | grep -qx postgres
+          sudo grep -q '^DATA_AGENT_DB_MODE=host        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Validate frontend static export
+        working-directory: frontend
+        run: |
+          test -f out/index.html
+          test -f out/admin/index.html
+          test -d out/_next
+
+      - name: Install server dependencies
+        run: npm ci
+      - name: Audit server dependencies
+        run: npm audit --audit-level=high
+      - run: npm run validate
+      - run: npm run generate
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx prisma migrate deploy
+
+      - name: Runtime smoke test
+        shell: bash
+        run: |
+          node scripts/mock-llm.mjs > /tmp/mock-llm.log 2>&1 &
+          MOCK_PID=$!
+          node dist/index.js > /tmp/data-agent-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" "$MOCK_PID" 2>/dev/null || true; echo "--- app log ---"; cat /tmp/data-agent-server.log; echo "--- mock llm log ---"; cat /tmp/mock-llm.log' EXIT
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+          grep -q '"llmConfigured":true' /tmp/health.json
+
+          STATUS=$(curl -sS -o /tmp/session.json -w '%{http_code}' http://127.0.0.1:3000/api/auth/session)
+          test "$STATUS" = "401"
+          grep -q '"auth_required"' /tmp/session.json
+
+          OTP_RESPONSE=$(curl -fsS             -H 'Content-Type: application/json'             -d '{"email":"ci@example.com","purpose":"login"}'             http://127.0.0.1:3000/api/auth/otp/request)
+          VERIFICATION_ID=$(printf '%s' "$OTP_RESPONSE" | jq -r '.verificationId')
+          test -n "$VERIFICATION_ID"
+          test "$VERIFICATION_ID" != "null"
+
+          for i in {1..10}; do
+            CODE=$(grep '\[OTP\] ci@example.com' /tmp/data-agent-server.log | tail -1 | sed -nE 's/.* ([0-9]{6})$/\1/p' || true)
+            if [ -n "$CODE" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$CODE"
+
+          curl -fsS             -c /tmp/cookies.txt             -H 'Content-Type: application/json'             -d "$(jq -nc --arg id "$VERIFICATION_ID" --arg code "$CODE" '{verificationId:$id,token:$code,email:"ci@example.com",purpose:"login"}')"             http://127.0.0.1:3000/api/auth/otp/verify > /tmp/login.json
+          grep -q 'ci@example.com' /tmp/login.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/auth/session > /tmp/session-auth.json
+          grep -q 'ci@example.com' /tmp/session-auth.json
+
+          curl -fsS \
+            -c /tmp/admin-cookies.txt \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@example.com","password":"ci-admin-password"}' \
+            http://127.0.0.1:3000/api/auth/password > /tmp/admin-login.json
+          grep -q '"role":"admin"' /tmp/admin-login.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-before.json
+          grep -q '"source":"environment"' /tmp/admin-llm-before.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            -X PATCH \
+            -H 'Content-Type: application/json' \
+            -d '{"providers":[{"id":"ci-a","name":"CI A","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-a"],"enabled":true},{"id":"ci-b","name":"CI B","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-b"],"enabled":true}],"models":[{"id":"mock-model","name":"Mock Model","enabled":true,"strategy":"round_robin","channels":[{"id":"channel-a","providerId":"ci-a","upstreamModel":"mock-model-a","enabled":true},{"id":"channel-b","providerId":"ci-b","upstreamModel":"mock-model-b","enabled":true}]}]}' \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-after.json
+          grep -q '"source":"database"' /tmp/admin-llm-after.json
+          grep -q '"hasApiKey":true' /tmp/admin-llm-after.json
+          ! grep -q 'ci-key' /tmp/admin-llm-after.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/runtime-models.json
+          test "$(jq '.data | length' /tmp/runtime-models.json)" = "1"
+          test "$(jq -r '.data[0].id' /tmp/runtime-models.json)" = "mock-model"
+          ! grep -q '::' /tmp/runtime-models.json
+
+          curl -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"name":"CI Dataset","source":"sample","columns":[{"name":"x","type":"number"}],"rows":[{"x":1},{"x":2}]}'             http://127.0.0.1:3000/api/data/import > /tmp/dataset-create.json
+          grep -q 'CI Dataset' /tmp/dataset-create.json
+          grep -q '"row_count":2' /tmp/dataset-create.json
+
+          DATASET_ID=$(jq -r '.[0].id' /tmp/dataset-create.json)
+          test -n "$DATASET_ID"
+          test "$DATASET_ID" != "null"
+
+          curl -fsS             -b /tmp/cookies.txt             'http://127.0.0.1:3000/api/data/datasets?select=id,name,row_count' > /tmp/datasets.json
+          grep -q 'CI Dataset' /tmp/datasets.json
+          grep -q '"row_count":2' /tmp/datasets.json
+
+          curl -fsS             -b /tmp/cookies.txt             "http://127.0.0.1:3000/api/data/dataset_rows?select=row_index,data&eq=%7B%22dataset_id%22%3A%22$DATASET_ID%22%7D&order=%7B%22column%22%3A%22row_index%22%2C%22ascending%22%3Atrue%7D" > /tmp/dataset-rows.json
+          test "$(jq 'length' /tmp/dataset-rows.json)" = "2"
+          test "$(jq -r '.[1].data.x' /tmp/dataset-rows.json)" = "2"
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/models.json
+          grep -q 'mock-model' /tmp/models.json
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"first"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-a.txt
+          grep -q 'channel-' /tmp/stream-a.txt
+          grep -q '"a"' /tmp/stream-a.txt
+          grep -q '\[DONE\]' /tmp/stream-a.txt
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"second"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-b.txt
+          grep -q 'channel-' /tmp/stream-b.txt
+          grep -q '"b"' /tmp/stream-b.txt
+          grep -q '\[DONE\]' /tmp/stream-b.txt
+
+          RATE_STATUS=$(curl -sS -o /tmp/rate.json -w '%{http_code}'             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":false,"messages":[{"role":"user","content":"third request"}]}'             http://127.0.0.1:3000/api/llm/chat/completions)
+          test "$RATE_STATUS" = "429"
+          grep -q '"llm_rate_minute"' /tmp/rate.json
+
+      - name: Validate Compose deployment
+        working-directory: .
+        env:
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+          POSTGRES_PASSWORD: ci-password
+          SESSION_SECRET: ci-session-secret-that-is-at-least-32-characters
+          LLM_BASE_URL: http://127.0.0.1:4010/v1
+        run: docker compose config --quiet
+
+      - name: Docker image build
+        working-directory: .
+        run: docker build -f server/Dockerfile .
+ .env
+          sudo grep -q '^DATA_AGENT_DB_HOST_KIND=docker-container        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Validate frontend static export
+        working-directory: frontend
+        run: |
+          test -f out/index.html
+          test -f out/admin/index.html
+          test -d out/_next
+
+      - name: Install server dependencies
+        run: npm ci
+      - name: Audit server dependencies
+        run: npm audit --audit-level=high
+      - run: npm run validate
+      - run: npm run generate
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx prisma migrate deploy
+
+      - name: Runtime smoke test
+        shell: bash
+        run: |
+          node scripts/mock-llm.mjs > /tmp/mock-llm.log 2>&1 &
+          MOCK_PID=$!
+          node dist/index.js > /tmp/data-agent-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" "$MOCK_PID" 2>/dev/null || true; echo "--- app log ---"; cat /tmp/data-agent-server.log; echo "--- mock llm log ---"; cat /tmp/mock-llm.log' EXIT
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+          grep -q '"llmConfigured":true' /tmp/health.json
+
+          STATUS=$(curl -sS -o /tmp/session.json -w '%{http_code}' http://127.0.0.1:3000/api/auth/session)
+          test "$STATUS" = "401"
+          grep -q '"auth_required"' /tmp/session.json
+
+          OTP_RESPONSE=$(curl -fsS             -H 'Content-Type: application/json'             -d '{"email":"ci@example.com","purpose":"login"}'             http://127.0.0.1:3000/api/auth/otp/request)
+          VERIFICATION_ID=$(printf '%s' "$OTP_RESPONSE" | jq -r '.verificationId')
+          test -n "$VERIFICATION_ID"
+          test "$VERIFICATION_ID" != "null"
+
+          for i in {1..10}; do
+            CODE=$(grep '\[OTP\] ci@example.com' /tmp/data-agent-server.log | tail -1 | sed -nE 's/.* ([0-9]{6})$/\1/p' || true)
+            if [ -n "$CODE" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$CODE"
+
+          curl -fsS             -c /tmp/cookies.txt             -H 'Content-Type: application/json'             -d "$(jq -nc --arg id "$VERIFICATION_ID" --arg code "$CODE" '{verificationId:$id,token:$code,email:"ci@example.com",purpose:"login"}')"             http://127.0.0.1:3000/api/auth/otp/verify > /tmp/login.json
+          grep -q 'ci@example.com' /tmp/login.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/auth/session > /tmp/session-auth.json
+          grep -q 'ci@example.com' /tmp/session-auth.json
+
+          curl -fsS \
+            -c /tmp/admin-cookies.txt \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@example.com","password":"ci-admin-password"}' \
+            http://127.0.0.1:3000/api/auth/password > /tmp/admin-login.json
+          grep -q '"role":"admin"' /tmp/admin-login.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-before.json
+          grep -q '"source":"environment"' /tmp/admin-llm-before.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            -X PATCH \
+            -H 'Content-Type: application/json' \
+            -d '{"providers":[{"id":"ci-a","name":"CI A","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-a"],"enabled":true},{"id":"ci-b","name":"CI B","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-b"],"enabled":true}],"models":[{"id":"mock-model","name":"Mock Model","enabled":true,"strategy":"round_robin","channels":[{"id":"channel-a","providerId":"ci-a","upstreamModel":"mock-model-a","enabled":true},{"id":"channel-b","providerId":"ci-b","upstreamModel":"mock-model-b","enabled":true}]}]}' \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-after.json
+          grep -q '"source":"database"' /tmp/admin-llm-after.json
+          grep -q '"hasApiKey":true' /tmp/admin-llm-after.json
+          ! grep -q 'ci-key' /tmp/admin-llm-after.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/runtime-models.json
+          test "$(jq '.data | length' /tmp/runtime-models.json)" = "1"
+          test "$(jq -r '.data[0].id' /tmp/runtime-models.json)" = "mock-model"
+          ! grep -q '::' /tmp/runtime-models.json
+
+          curl -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"name":"CI Dataset","source":"sample","columns":[{"name":"x","type":"number"}],"rows":[{"x":1},{"x":2}]}'             http://127.0.0.1:3000/api/data/import > /tmp/dataset-create.json
+          grep -q 'CI Dataset' /tmp/dataset-create.json
+          grep -q '"row_count":2' /tmp/dataset-create.json
+
+          DATASET_ID=$(jq -r '.[0].id' /tmp/dataset-create.json)
+          test -n "$DATASET_ID"
+          test "$DATASET_ID" != "null"
+
+          curl -fsS             -b /tmp/cookies.txt             'http://127.0.0.1:3000/api/data/datasets?select=id,name,row_count' > /tmp/datasets.json
+          grep -q 'CI Dataset' /tmp/datasets.json
+          grep -q '"row_count":2' /tmp/datasets.json
+
+          curl -fsS             -b /tmp/cookies.txt             "http://127.0.0.1:3000/api/data/dataset_rows?select=row_index,data&eq=%7B%22dataset_id%22%3A%22$DATASET_ID%22%7D&order=%7B%22column%22%3A%22row_index%22%2C%22ascending%22%3Atrue%7D" > /tmp/dataset-rows.json
+          test "$(jq 'length' /tmp/dataset-rows.json)" = "2"
+          test "$(jq -r '.[1].data.x' /tmp/dataset-rows.json)" = "2"
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/models.json
+          grep -q 'mock-model' /tmp/models.json
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"first"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-a.txt
+          grep -q 'channel-' /tmp/stream-a.txt
+          grep -q '"a"' /tmp/stream-a.txt
+          grep -q '\[DONE\]' /tmp/stream-a.txt
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"second"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-b.txt
+          grep -q 'channel-' /tmp/stream-b.txt
+          grep -q '"b"' /tmp/stream-b.txt
+          grep -q '\[DONE\]' /tmp/stream-b.txt
+
+          RATE_STATUS=$(curl -sS -o /tmp/rate.json -w '%{http_code}'             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":false,"messages":[{"role":"user","content":"third request"}]}'             http://127.0.0.1:3000/api/llm/chat/completions)
+          test "$RATE_STATUS" = "429"
+          grep -q '"llm_rate_minute"' /tmp/rate.json
+
+      - name: Validate Compose deployment
+        working-directory: .
+        env:
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+          POSTGRES_PASSWORD: ci-password
+          SESSION_SECRET: ci-session-secret-that-is-at-least-32-characters
+          LLM_BASE_URL: http://127.0.0.1:4010/v1
+        run: docker compose config --quiet
+
+      - name: Docker image build
+        working-directory: .
+        run: docker build -f server/Dockerfile .
+ .env
+          sudo grep -q '^DATA_AGENT_DB_CONTAINER=data-agent-host-postgres-ci        with:
+          node-version: 22
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run typecheck
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Validate frontend static export
+        working-directory: frontend
+        run: |
+          test -f out/index.html
+          test -f out/admin/index.html
+          test -d out/_next
+
+      - name: Install server dependencies
+        run: npm ci
+      - name: Audit server dependencies
+        run: npm audit --audit-level=high
+      - run: npm run validate
+      - run: npm run generate
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx prisma migrate deploy
+
+      - name: Runtime smoke test
+        shell: bash
+        run: |
+          node scripts/mock-llm.mjs > /tmp/mock-llm.log 2>&1 &
+          MOCK_PID=$!
+          node dist/index.js > /tmp/data-agent-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" "$MOCK_PID" 2>/dev/null || true; echo "--- app log ---"; cat /tmp/data-agent-server.log; echo "--- mock llm log ---"; cat /tmp/mock-llm.log' EXIT
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:3000/api/health > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          cat /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+          grep -q '"llmConfigured":true' /tmp/health.json
+
+          STATUS=$(curl -sS -o /tmp/session.json -w '%{http_code}' http://127.0.0.1:3000/api/auth/session)
+          test "$STATUS" = "401"
+          grep -q '"auth_required"' /tmp/session.json
+
+          OTP_RESPONSE=$(curl -fsS             -H 'Content-Type: application/json'             -d '{"email":"ci@example.com","purpose":"login"}'             http://127.0.0.1:3000/api/auth/otp/request)
+          VERIFICATION_ID=$(printf '%s' "$OTP_RESPONSE" | jq -r '.verificationId')
+          test -n "$VERIFICATION_ID"
+          test "$VERIFICATION_ID" != "null"
+
+          for i in {1..10}; do
+            CODE=$(grep '\[OTP\] ci@example.com' /tmp/data-agent-server.log | tail -1 | sed -nE 's/.* ([0-9]{6})$/\1/p' || true)
+            if [ -n "$CODE" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test -n "$CODE"
+
+          curl -fsS             -c /tmp/cookies.txt             -H 'Content-Type: application/json'             -d "$(jq -nc --arg id "$VERIFICATION_ID" --arg code "$CODE" '{verificationId:$id,token:$code,email:"ci@example.com",purpose:"login"}')"             http://127.0.0.1:3000/api/auth/otp/verify > /tmp/login.json
+          grep -q 'ci@example.com' /tmp/login.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/auth/session > /tmp/session-auth.json
+          grep -q 'ci@example.com' /tmp/session-auth.json
+
+          curl -fsS \
+            -c /tmp/admin-cookies.txt \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@example.com","password":"ci-admin-password"}' \
+            http://127.0.0.1:3000/api/auth/password > /tmp/admin-login.json
+          grep -q '"role":"admin"' /tmp/admin-login.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-before.json
+          grep -q '"source":"environment"' /tmp/admin-llm-before.json
+
+          curl -fsS -b /tmp/admin-cookies.txt \
+            -X PATCH \
+            -H 'Content-Type: application/json' \
+            -d '{"providers":[{"id":"ci-a","name":"CI A","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-a"],"enabled":true},{"id":"ci-b","name":"CI B","baseUrl":"http://127.0.0.1:4010/v1","apiKey":"ci-key","models":["mock-model-b"],"enabled":true}],"models":[{"id":"mock-model","name":"Mock Model","enabled":true,"strategy":"round_robin","channels":[{"id":"channel-a","providerId":"ci-a","upstreamModel":"mock-model-a","enabled":true},{"id":"channel-b","providerId":"ci-b","upstreamModel":"mock-model-b","enabled":true}]}]}' \
+            http://127.0.0.1:3000/api/admin/settings/llm > /tmp/admin-llm-after.json
+          grep -q '"source":"database"' /tmp/admin-llm-after.json
+          grep -q '"hasApiKey":true' /tmp/admin-llm-after.json
+          ! grep -q 'ci-key' /tmp/admin-llm-after.json
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/runtime-models.json
+          test "$(jq '.data | length' /tmp/runtime-models.json)" = "1"
+          test "$(jq -r '.data[0].id' /tmp/runtime-models.json)" = "mock-model"
+          ! grep -q '::' /tmp/runtime-models.json
+
+          curl -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"name":"CI Dataset","source":"sample","columns":[{"name":"x","type":"number"}],"rows":[{"x":1},{"x":2}]}'             http://127.0.0.1:3000/api/data/import > /tmp/dataset-create.json
+          grep -q 'CI Dataset' /tmp/dataset-create.json
+          grep -q '"row_count":2' /tmp/dataset-create.json
+
+          DATASET_ID=$(jq -r '.[0].id' /tmp/dataset-create.json)
+          test -n "$DATASET_ID"
+          test "$DATASET_ID" != "null"
+
+          curl -fsS             -b /tmp/cookies.txt             'http://127.0.0.1:3000/api/data/datasets?select=id,name,row_count' > /tmp/datasets.json
+          grep -q 'CI Dataset' /tmp/datasets.json
+          grep -q '"row_count":2' /tmp/datasets.json
+
+          curl -fsS             -b /tmp/cookies.txt             "http://127.0.0.1:3000/api/data/dataset_rows?select=row_index,data&eq=%7B%22dataset_id%22%3A%22$DATASET_ID%22%7D&order=%7B%22column%22%3A%22row_index%22%2C%22ascending%22%3Atrue%7D" > /tmp/dataset-rows.json
+          test "$(jq 'length' /tmp/dataset-rows.json)" = "2"
+          test "$(jq -r '.[1].data.x' /tmp/dataset-rows.json)" = "2"
+
+          curl -fsS -b /tmp/cookies.txt http://127.0.0.1:3000/api/llm/models > /tmp/models.json
+          grep -q 'mock-model' /tmp/models.json
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"first"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-a.txt
+          grep -q 'channel-' /tmp/stream-a.txt
+          grep -q '"a"' /tmp/stream-a.txt
+          grep -q '\[DONE\]' /tmp/stream-a.txt
+
+          curl -N -fsS             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":true,"messages":[{"role":"user","content":"second"}]}'             http://127.0.0.1:3000/api/llm/chat/completions > /tmp/stream-b.txt
+          grep -q 'channel-' /tmp/stream-b.txt
+          grep -q '"b"' /tmp/stream-b.txt
+          grep -q '\[DONE\]' /tmp/stream-b.txt
+
+          RATE_STATUS=$(curl -sS -o /tmp/rate.json -w '%{http_code}'             -b /tmp/cookies.txt             -H 'Content-Type: application/json'             -d '{"model":"mock-model","stream":false,"messages":[{"role":"user","content":"third request"}]}'             http://127.0.0.1:3000/api/llm/chat/completions)
+          test "$RATE_STATUS" = "429"
+          grep -q '"llm_rate_minute"' /tmp/rate.json
+
+      - name: Validate Compose deployment
+        working-directory: .
+        env:
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:test
+          POSTGRES_PASSWORD: ci-password
+          SESSION_SECRET: ci-session-secret-that-is-at-least-32-characters
+          LLM_BASE_URL: http://127.0.0.1:4010/v1
+        run: docker compose config --quiet
+
+      - name: Docker image build
+        working-directory: .
+        run: docker build -f server/Dockerfile .
+ .env
+          sudo grep -q 'name: data-agent-db-link' compose.yaml
+
+          DB_PASS="$(sudo sed -n 's/^DATA_AGENT_DB_PASSWORD=//p' .env)"
+          sudo docker run --rm --network data-agent-db-link \
+            -e PGPASSWORD="$DB_PASS" postgres:17-alpine \
+            psql -h data-agent-host-postgres-ci -U data_agent -d data_agent -Atqc 'SELECT 1' | grep -qx 1
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
