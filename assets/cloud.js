@@ -246,6 +246,22 @@ window.Cloud = (function () {
       const data = dataOf(raw);
       return Array.isArray(data) ? data : [];
     },
+
+    async importDataset(meta, rows) {
+      const raw = await withAuthRetry(() =>
+        request('/data/import', {
+          method: 'POST',
+          body: {
+            name: meta.name,
+            source: meta.source,
+            columns: meta.columns,
+            rows,
+          },
+        })
+      );
+      const data = dataOf(raw);
+      return Array.isArray(data) ? data : [];
+    },
   };
 
   /* ---------- 大模型：兼容 OpenAI 风格 SSE ---------- */
