@@ -272,3 +272,22 @@ jobs:
       - name: Docker image build
         working-directory: .
         run: docker build -f server/Dockerfile .
+
+      - name: Full one-click installer smoke
+        working-directory: .
+        env:
+          DATA_AGENT_INSTALL_DIR: /tmp/data-agent-installer-smoke
+          DATA_AGENT_ADMIN_EMAIL: installer-smoke@example.com
+          DATA_AGENT_APP_PORT: "19003"
+          DATA_AGENT_APP_ORIGIN: http://127.0.0.1:19003
+          DATA_AGENT_ACCESS_MODE: http
+          DATA_AGENT_DB_MODE: local
+          DATA_AGENT_IMAGE: ghcr.io/paimoncai/data-agent:latest
+        run: |
+          trap 'if [ -f /tmp/data-agent-installer-smoke/compose.yaml ]; then cd /tmp/data-agent-installer-smoke && sudo docker compose down -v --remove-orphans || true; fi; sudo rm -rf /tmp/data-agent-installer-smoke' EXIT
+          sudo -E bash install.sh --yes
+          curl -fsS http://127.0.0.1:19003/api/health | grep -q '"ok":true'
+          sudo grep -q '^BOOTSTRAP_ADMIN_PASSWORD= /tmp/data-agent-installer-smoke/.env
+          APP_ID="$(cd /tmp/data-agent-installer-smoke && sudo docker compose ps -q app)"
+          test -n "$APP_ID"
+          test "$(sudo docker inspect "$APP_ID" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^BOOTSTRAP_ADMIN_PASSWORD=' | tail -1)" = "BOOTSTRAP_ADMIN_PASSWORD="
