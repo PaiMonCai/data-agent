@@ -300,7 +300,7 @@ export default function DataAgentApp() {
       </div>
 
       {importOpen && <ImportDialog onClose={() => setImportOpen(false)} onImported={imported}/>}
-      {settingsOpen && <SettingsDialog settings={settingsState} onChange={updateSettings} models={models} onClose={() => setSettingsOpen(false)}/>}
+      {settingsOpen && <SettingsDialog settings={settingsState} onChange={updateSettings} models={models} user={user} onClose={() => setSettingsOpen(false)}/>}
     </div>
   );
 }
