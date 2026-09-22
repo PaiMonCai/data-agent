@@ -543,7 +543,7 @@ export default function DataAgentApp() {
         stage: "完成",
         report: out.report || streamed,
         plan: out.plan,
-        task: out.task,
+        task: out.task as "analyze" | "clean",
         ...(out.task === "clean" ? { clean: out.clean } : { result: out.result }),
       });
 
