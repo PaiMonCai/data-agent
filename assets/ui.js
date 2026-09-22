@@ -1175,21 +1175,13 @@
         name: c.name, type: c.type, unique: c.unique, sample: c.sample,
         labels: c.labels || null, desc: c.desc || null,
       }));
-      const created = await Cloud.db.insert('datasets', {
+      const created = await Cloud.db.importDataset({
         name: name.slice(0, 60),
         source,
         columns: meta,
-        row_count: rows.length,
-      });
+      }, rows);
       const ds = created[0];
-      for (let i = 0; i < rows.length; i += L.insertChunk) {
-        const slice = rows.slice(i, i + L.insertChunk).map((r, j) => ({
-          dataset_id: ds.id,
-          row_index: i + j,
-          data: r,
-        }));
-        await Cloud.db.insert('dataset_rows', slice);
-      }
+      if (!ds || !ds.id) throw new Error('数据集创建失败：服务端未返回数据集 ID');
       closeModal();
       toast(truncated ? `已导入 ${rows.length} 行（超出上限，已截断）` : `已导入 ${rows.length} 行数据`);
       await loadDatasets();

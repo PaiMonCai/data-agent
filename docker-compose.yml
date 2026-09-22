@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: data_agent
+      POSTGRES_USER: data_agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - data-agent-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U data_agent -d data_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://data_agent:${POSTGRES_PASSWORD}@postgres:5432/data_agent
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET}
+      SESSION_DAYS: ${SESSION_DAYS:-30}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-Lax}
+      APP_ORIGIN: ${APP_ORIGIN:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:?Set LLM_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODELS: ${LLM_MODELS:-}
+      LLM_REQUESTS_PER_MINUTE: ${LLM_REQUESTS_PER_MINUTE:-10}
+      LLM_REQUESTS_PER_DAY: ${LLM_REQUESTS_PER_DAY:-300}
+      LLM_MAX_INPUT_CHARS: ${LLM_MAX_INPUT_CHARS:-200000}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-180000}
+      MAIL_MODE: ${MAIL_MODE:-console}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-Data Agent <no-reply@example.com>}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+
+volumes:
+  data-agent-postgres:
