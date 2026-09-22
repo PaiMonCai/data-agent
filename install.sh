@@ -202,6 +202,43 @@ dotenv_quote() {
   printf "'%s'" "$value"
 }
 
+deployment_compose() {
+  env \
+    -u DATA_AGENT_IMAGE \
+    -u APP_BIND \
+    -u APP_PORT \
+    -u APP_ORIGIN \
+    -u COOKIE_SECURE \
+    -u COOKIE_SAME_SITE \
+    -u DATABASE_URL \
+    -u SESSION_SECRET \
+    -u SYSTEM_CONFIG_ENCRYPTION_KEY \
+    -u BOOTSTRAP_ADMIN_EMAIL \
+    -u BOOTSTRAP_ADMIN_PASSWORD \
+    -u SESSION_DAYS \
+    -u LLM_BASE_URL \
+    -u LLM_API_KEY \
+    -u LLM_MODELS \
+    -u LLM_REQUESTS_PER_MINUTE \
+    -u LLM_REQUESTS_PER_DAY \
+    -u LLM_MAX_INPUT_CHARS \
+    -u LLM_TIMEOUT_MS \
+    -u MAIL_MODE \
+    -u SMTP_HOST \
+    -u SMTP_PORT \
+    -u SMTP_SECURE \
+    -u SMTP_USER \
+    -u SMTP_PASS \
+    -u SMTP_FROM \
+    -u DATA_AGENT_DB_DATABASE \
+    -u DATA_AGENT_DB_USERNAME \
+    -u DATA_AGENT_DB_PASSWORD \
+    -u DATA_AGENT_DB_PROXY_PORT \
+    -u DATA_AGENT_DB_PROXY_BIND \
+    -u DATA_AGENT_DB_SOURCE_PORT \
+    docker compose "$@"
+}
+
 ensure_docker() {
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     [[ "$RENDER_ONLY" -eq 1 ]] || docker info >/dev/null 2>&1 || die "Docker daemon is not reachable"
@@ -477,7 +514,7 @@ $DB_NETWORK_DECL_BLOCK
 EOF
 
   chmod 644 compose.yaml
-  docker compose config >/dev/null
+  deployment_compose config >/dev/null
 }
 
 wait_for_health() {
@@ -491,8 +528,8 @@ wait_for_health() {
     sleep 2
   done
   warn "health check did not pass"
-  docker compose ps >&2 || true
-  docker compose logs --tail=120 app >&2 || true
+  deployment_compose ps >&2 || true
+  deployment_compose logs --tail=120 app >&2 || true
   return 1
 }
 
@@ -591,17 +628,17 @@ EOF
 
   cd "$INSTALL_DIR"
   log "pulling deployment images..."
-  docker compose pull
+  deployment_compose pull
 
   verify_database_connectivity
 
   log "starting Data Agent..."
-  docker compose up -d --remove-orphans
+  deployment_compose up -d --remove-orphans
 
   if wait_for_health; then
     clear_bootstrap_password
     log "removing bootstrap administrator password from the running container..."
-    docker compose up -d --force-recreate app >/dev/null
+    deployment_compose up -d --force-recreate app >/dev/null
     wait_for_health || die "Data Agent failed health validation after removing bootstrap credentials"
   else
     die "Data Agent started but failed health validation"
