@@ -80,7 +80,8 @@ app.route("/api/data", dataRoutes);
 app.route("/api/llm", llmRoutes);
 
 if (env.serveStatic) {
-  app.use("/assets/*", serveStatic({ root: env.staticRoot }));
+  // Next.js uses static export, so Hono only needs to serve the generated files.
+  app.use("/*", serveStatic({ root: env.staticRoot }));
   app.get("/", serveStatic({ root: env.staticRoot, path: "index.html" }));
 }
 

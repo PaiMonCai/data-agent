@@ -1,4 +1,13 @@
-FROM node:22-alpine AS build
+FROM node:22-alpine AS frontend-build
+WORKDIR /app/frontend
+
+COPY frontend/package.json ./
+RUN npm install
+
+COPY frontend ./
+RUN npm run build
+
+FROM node:22-alpine AS server-build
 WORKDIR /app/server
 
 COPY server/package.json ./
@@ -26,9 +35,8 @@ COPY server/prisma ./prisma
 COPY server/prisma.config.ts ./
 RUN npm install --omit=dev && npm cache clean --force
 
-COPY --from=build /app/server/dist ./dist
-COPY index.html ./public/index.html
-COPY assets ./public/assets
+COPY --from=server-build /app/server/dist ./dist
+COPY --from=frontend-build /app/frontend/out ./public
 
 EXPOSE 3000
 
