@@ -1,0 +1,13 @@
+.git
+.github
+.vscode
+
+# 密钥与本地产物不进构建上下文
+.env
+**/.env
+**/*.log
+
+# 镜像内会重新 install / generate / 编译
+**/node_modules
+**/dist
+server/src/generated
